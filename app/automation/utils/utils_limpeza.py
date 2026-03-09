@@ -80,7 +80,7 @@ def limpar_pasta_segura(caminho: Path, remover_pastas: bool = False) -> dict:
     return resumo
 
 
-def liberar_memoria_e_limpar_temporarios(driver=None) -> dict:
+def liberar_memoria_e_limpar_temporarios(driver=None):
     """
     Função para ser usada pela automação:
     - fecha/limpa recursos possíveis;

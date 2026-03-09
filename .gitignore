@@ -1,3 +1,4 @@
 env
 venv
 others
+**/__pycache__

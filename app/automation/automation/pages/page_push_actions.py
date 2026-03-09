@@ -1084,6 +1084,10 @@ class AutomacaoPush:
 
     # -----------------------------------------------------
 
+
+
+
+
     def capturar_mensagem_feedback(self, timeout=5, verbose=True):
         """
         Captura mensagens de feedback (snackbar / toast / alert)
@@ -1141,6 +1145,43 @@ class AutomacaoPush:
             "sucesso": False,
             "mensagem": None
         }
+
+
+    def capturar_feedback_ou_validar_total(self, total_anterior=None, timeout=5, verbose=True):
+        """
+        1) Tenta capturar snackbar
+        2) Se não conseguir, compara total da página
+        """
+
+        # 🔎 1 - Tenta capturar mensagem normalmente
+        resultado = self.capturar_mensagem_feedback(timeout=timeout, verbose=verbose)
+
+        if resultado["sucesso"]:
+            return resultado
+
+        # 🔁 2 - Fallback: verificar se total aumentou
+        if total_anterior is not None:
+
+            total_atual = self.obter_total_registros_tela(timeout=5)
+
+            if total_atual is not None and total_atual > total_anterior:
+                if verbose:
+                    print(f"✅ Total aumentou: {total_anterior} → {total_atual}")
+
+                return {
+                    "sucesso": True,
+                    "mensagem": f"Registro inserido (validação por total: {total_atual})"
+                }
+
+            else:
+                if verbose:
+                    print(f"❌ Total não aumentou ({total_anterior} → {total_atual})")
+
+        return {
+            "sucesso": False,
+            "mensagem": "Não foi possível confirmar inserção"
+        }
+
 
 
     def capturar_mensagem_feedback_v0(
@@ -1328,38 +1369,42 @@ class AutomacaoPush:
     def function_main_cad_push(self, numero_processo, context):
 
         get_except = False
+        result = None
 
         # MENU COMPLETO
-        if not context == 'pje-atual':
+        # if not context == 'pje-atual':
+        # MEU PAINAL -> Tratar avisos
+        self.safe_click(self.BTN_MEU_PAINEL, 5)
 
-            # MEU PAINAL -> Tratar avisos
-            self.safe_click(self.BTN_MEU_PAINEL, 5)
+        try:
+            # MENU COMPLETO
+            result = self.safe_click(self.BTN_MENU_COMPLETO, 5)
+            print(f'- (Resuldado): {result}')
+            get_except = True if result is False else False
+        except Exception as e:
+            print(f'- (Elemento não localizado)[BTN_MENU_COMPLETO]: {e}')
+            get_except = True
 
-            try:
-                # MENU COMPLETO
-                self.safe_click(self.BTN_MENU_COMPLETO, 5)
-            except Exception as e:
-                print(f'- (Elemento não localizado)[BTN_MENU_COMPLETO]: {e}')
-                get_except = True
+        if get_except or result is False:
+            # MENU PUSH
+            self.safe_click(self.BTN_PUSH_MENU, 5)
 
-                # MENU PUSH
-                self.safe_click(self.BTN_PUSH_MENU, 5)
+        if get_except is False:
 
+            # CADASTRO
+            # self.safe_click(self.BTN_CADASTRO, 5)
+            if not self.safe_click(self.BTN_CADASTRO):
+                raise RuntimeError("Contexto inválido para BTN_CADASTRO")
 
-            if get_except is False:
+            # PUSH
+            self.safe_click(self.BTN_PUSH, 5)
 
-                # CADASTRO
-                # self.safe_click(self.BTN_CADASTRO, 5)
-                if not self.safe_click(self.BTN_CADASTRO):
-                    raise RuntimeError("Contexto inválido para BTN_CADASTRO")
-
-                # PUSH
-                self.safe_click(self.BTN_PUSH, 5)
+        # Pegar total de registros antes
+        total_antes = self.obter_total_registros_tela(5)
 
         # BTN ADICIONAR
         self.safe_click(
-            self.BTN_ADDPUSH,
-            5
+            self.BTN_ADDPUSH, 5
         )
 
         self.escrever_campo(
@@ -1370,8 +1415,7 @@ class AutomacaoPush:
         )
 
         self.safe_click(
-            self.BTN_INCLUIR,
-            5
+            self.BTN_INCLUIR, 5
         )
 
         # ⏳ Aguarda página carregar novamente
@@ -1384,13 +1428,15 @@ class AutomacaoPush:
         # ⏳ Aguarda página carregar novamente
         self.wait_pagina_carregada()
 
-        msg = self.capturar_mensagem_feedback(5)
-        print(f'- (Msg): {msg}')
-
+        msg_return = self.capturar_feedback_ou_validar_total(
+            total_anterior=total_antes
+        )
+        # msg = self.capturar_mensagem_feedback(5)
+        # print(f'- (Msg): {msg}')
         # scraper.save_json("processos_push.json")
-        print(f"[OK] Processo {numero_processo} inserido no Push.")
+        print(f"[OK] Processo {numero_processo} processado. | [Msg]: {msg_return}")
 
-        return msg
+        return msg_return
 
 
     def function_main_del_push(self, pagina, numero_processo, context):

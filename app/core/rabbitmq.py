@@ -12,6 +12,7 @@ class Rabbitmq():
     def __init__(self, callback=None):
         self.__host = os.getenv("HOST_RABBITMQ")
         self.__port = int(os.getenv("PORT_RABBITMQ"))
+        self.__vhost = os.getenv("VHOST")
         self.__username = os.getenv("USER")
         self.__password = os.getenv("PASSWORD")
         self.__queue_received_push = os.getenv("QUEUE_RECEIVED_EVENT_PUSH")
@@ -24,6 +25,7 @@ class Rabbitmq():
         connection_parameters = pika.ConnectionParameters(
             host=self.__host,
             port=self.__port,
+            virtual_host=self.__vhost,
             credentials=pika.PlainCredentials(
                 username=self.__username,
                 password=self.__password

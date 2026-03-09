@@ -14,11 +14,13 @@ def callback_start_automacao(ch, method, properties, body):
     print('- (Status): Iniciando a automação ...')
     msg_return = main.start_automation(body)
     print(f'- (Msg Resposta): {msg_return}')
+    
 
 
 def callback_post_return_status_push(ch, method, properties, body):
     print(f'- [Consumers_2][return_event_status_push_key]: {body} | {type(body)}')
     print('- (Status): Encaminhando status de retorno para o sistema dos formulários...')
+
 
 # --- LÓGICA DO CONSUMER (WORKER) ---
 def start_consumer_queue_1():
@@ -44,21 +46,21 @@ def listar_push():
 
 @app.route('/push/received', methods=['POST'])
 def send_push_queue():
-    novo_produto = request.get_json()
+    novo_push = request.get_json()
     
     # 1. Adiciona na lista local (opcional)
-    produtos.append(novo_produto)
+    produtos.append(novo_push)
 
     # 2. ENCAMINHAR PARA O RABBITMQ
     # Aqui você deve chamar o seu Producer para colocar o dado na fila
     rabbit_producer = Rabbitmq()
-    rabbit_producer.publisher(novo_produto, os.getenv('RECEIVED_EVENT_PUSH_KEY'))
+    rabbit_producer.publisher(novo_push, os.getenv('RECEIVED_EVENT_PUSH_KEY'))
     
-    print(f" [API] Recebido e enviado para fila: {novo_produto['numero_processo']}")
+    print(f" [API] Recebido e enviado para fila: {novo_push['numero_processo']}")
     
     return jsonify({
         "mensagem": "Encaminhado para fila de processamento!", 
-        "item": novo_produto
+        "item": novo_push
     }), 201
 
 

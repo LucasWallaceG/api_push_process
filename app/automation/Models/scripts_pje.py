@@ -171,10 +171,10 @@ def criar_driver():
     return driver
 
 
-def abrir_pje(driver, trt):
+def abrir_pje(driver, trt, grau="primeirograu"):
     time.sleep(3)
     try:
-        url = f"https://pje.trt{trt}.jus.br/primeirograu/login.seam"
+        url = f"https://pje.trt{trt}.jus.br/{grau}/login.seam"
         mensagem = f"🌐 Acessando URL: {url}"
         print(mensagem)
         
@@ -362,7 +362,11 @@ def preencher_senha_desktop(perito: str):
         return False
 
     nome_imagem = MAP_IMG_CERTIFICADO[perito]
-    local_img = os.path.join(os.getcwd(), "images", nome_imagem)
+    # local_img = os.path.join(os.getcwd(), "images", nome_imagem)
+    subdir = r"app\automation\images"
+    local_img = os.path.join(os.getcwd(), subdir, nome_imagem)
+    print(f'- (Subdir): {subdir}')
+    print(f'- (DirFull): {local_img}')
 
     print(f"▶ Selecionando certificado para: {perito.upper()}")
     print(f"📄 Imagem usada: {local_img}")
@@ -382,7 +386,12 @@ def preencher_senha_desktop(perito: str):
             print("🎉 Certificado selecionado com sucesso!")
 
             nome_imagem = "btn_ok.png"
-            local_img = os.path.join(os.getcwd(), "images", nome_imagem)
+            # local_img = os.path.join(os.getcwd(), "images", nome_imagem)
+            subdir = r"app\automation\images"
+            local_img = os.path.join(os.getcwd(), subdir, nome_imagem)
+            print(f'- (Subdir): {subdir}')
+            print(f'- (DirFull): {local_img}')
+            
             resultado_2 = duplo_click_certificado(local_img)
             if resultado_2[0]:
                 print('🎉 Clique no botão de confirmação efetuado com sucesso!')
