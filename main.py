@@ -1,28 +1,88 @@
 import os
+import json
 import threading
-from flask import Flask, jsonify, request
+from datetime import datetime
+from flask import Flask, jsonify, request, render_template
 from app.core.rabbitmq import Rabbitmq
 from app.automation import main
 
 app = Flask(__name__)
 
-processos = [] # Seu mock de dados
+# --- TRACKING DE PROCESSOS ---
+registros = []
+_lock = threading.Lock()
+_ordem_counter = 0
 
 
+def registrar(processo, trt, grau, acao, status, msg=""):
+    global _ordem_counter
+    with _lock:
+        _ordem_counter += 1
+
+        # Atualiza registro existente (mesmo processo + acao) ou cria novo
+        for r in registros:
+            if r["processo"] == processo and r["acao"] == acao:
+                r["status"] = status
+                r["msg"] = msg
+                r["data_hora"] = datetime.now().isoformat()
+                return r
+
+        registro = {
+            "ordem": _ordem_counter,
+            "processo": processo,
+            "trt": trt,
+            "grau": grau,
+            "acao": acao,
+            "status": status,
+            "msg": msg,
+            "data_hora": datetime.now().isoformat(),
+        }
+        registros.insert(0, registro)
+        return registro
+
+
+# --- CALLBACK DO CONSUMER ---
 def callback_start_automacao(ch, method, properties, body):
     print(f'- [Consumer][received_push]: {body}')
-    print('- (Status): Iniciando a automação ...')
+    print('- (Status): Iniciando a automacao ...')
+
+    # Parsear payload para tracking
+    try:
+        data = json.loads(body.decode()) if isinstance(body, (bytes, bytearray)) else json.loads(body)
+    except Exception:
+        data = {}
+
+    processo = data.get("numero_processo")
+    trt = data.get("tribunal")
+    grau = data.get("grau")
+    acao = data.get("acao")
+
+    # Registrar como PROCESSANDO
+    registrar(processo, trt, grau, acao, "PROCESSANDO", "Automacao em andamento...")
+
     try:
         msg_return = main.start_automation(body)
         print(f'- (Msg Resposta): {msg_return}')
+
+        # Atualizar com resultado final
+        if isinstance(msg_return, dict):
+            status_final = msg_return.get("status", "ERRO").upper()
+            msg_final = msg_return.get("msg", "")
+        else:
+            status_final = "ERRO"
+            msg_final = str(msg_return)
+
+        registrar(processo, trt, grau, acao, status_final, msg_final)
+
     except Exception as e:
-        print(f'- (Erro crítico no callback): {e}')
+        print(f'- (Erro critico no callback): {e}')
+        registrar(processo, trt, grau, acao, "ERRO", str(e))
     finally:
         ch.basic_ack(delivery_tag=method.delivery_tag)
         print('- (ACK): Mensagem confirmada na fila.')
 
 
-# --- LÓGICA DO CONSUMER (WORKER) ---
+# --- LOGICA DO CONSUMER (WORKER) ---
 def start_consumer():
     rabbit = Rabbitmq(callback_start_automacao)
     rabbit.consumer(os.getenv('QUEUE_RECEIVED_EVENT_PUSH'))
@@ -30,18 +90,27 @@ def start_consumer():
     print(" [Worker] RabbitMQ Consumer iniciado e aguardando mensagens...")
 
 
-# --- ROTAS DA API ---
+# --- ROTAS ---
+@app.route('/')
+def dashboard():
+    return render_template('dashboard.html')
+
+
+@app.route('/api/dashboard')
+def api_dashboard():
+    with _lock:
+        return jsonify({"registros": registros})
+
+
 @app.route('/push/received', methods=['GET'])
 def listar_push():
-    return jsonify(processos), 200
+    with _lock:
+        return jsonify(registros), 200
+
 
 @app.route('/push/received', methods=['POST'])
 def send_push_queue():
     print('- (API) - Enviando para fila de processamento...')
-    # novo_push = request.get_json()
-    
-    # 1. Adiciona na lista local (opcional)
-    # processos.append(novo_push)
 
     novo_push = request.get_json(silent=True)
 
@@ -53,7 +122,7 @@ def send_push_queue():
     numero_processo = novo_push.get("numero_processo")
     if not numero_processo:
         return jsonify({
-            "mensagem": "Campo obrigatório ausente: numero_processo",
+            "mensagem": "Campo obrigatorio ausente: numero_processo",
             "item": novo_push
         }), 400
 
@@ -62,24 +131,27 @@ def send_push_queue():
 
     if not routing_key:
         return jsonify({
-            "mensagem": "Variável de ambiente RECEIVED_EVENT_PUSH_KEY não configurada"
+            "mensagem": "Variavel de ambiente RECEIVED_EVENT_PUSH_KEY nao configurada"
         }), 500
 
     if exchange is None:
         return jsonify({
-            "mensagem": "Variável de ambiente EXCHANGE não configurada"
+            "mensagem": "Variavel de ambiente EXCHANGE nao configurada"
         }), 500
 
     try:
-        processos.append(novo_push)
-
-        # 2. ENCAMINHAR PARA O RABBITMQ
-        # Aqui você deve chamar o seu Producer para colocar o dado na fila
-        # rabbit_producer = Rabbitmq()
-        # rabbit_producer.publisher(novo_push, os.getenv('RECEIVED_EVENT_PUSH_KEY'))
-
         rabbit_producer = Rabbitmq()
         rabbit_producer.publisher(novo_push, routing_key)
+
+        # Registrar como AGUARDANDO
+        registrar(
+            numero_processo,
+            novo_push.get("tribunal"),
+            novo_push.get("grau"),
+            novo_push.get("acao"),
+            "AGUARDANDO",
+            "Na fila de processamento",
+        )
 
     except Exception as e:
         print(f"- (Erro): Falha ao publicar no RabbitMQ: {e}")
@@ -87,20 +159,19 @@ def send_push_queue():
             "mensagem": "Falha ao encaminhar para a fila de processamento"
         }), 502
 
-    print(f" [API] Recebido e enviado para fila: {novo_push['numero_processo']}")
-    
+    print(f" [API] Recebido e enviado para fila: {numero_processo}")
+
     return jsonify({
-        "mensagem": "Encaminhado para fila de processamento!", 
+        "mensagem": "Encaminhado para fila de processamento!",
         "item": novo_push
     }), 201
 
 
 if __name__ == '__main__':
-    # Thread do consumer RabbitMQ (não trava a API)
+    # Thread do consumer RabbitMQ (nao trava a API)
     t = threading.Thread(target=start_consumer, daemon=True)
     t.start()
 
     # API Flask (fluxo principal)
     print(" [API] Flask rodando na porta 5000...")
     app.run(host="0.0.0.0", port=5000, debug=True, use_reloader=False)
-    
