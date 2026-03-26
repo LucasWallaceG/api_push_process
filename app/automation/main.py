@@ -1,5 +1,4 @@
 import json
-import pika
 import requests
 from .Models.scripts_pje import *
 from .utils.script_acessar_pje import preparar_ambiente
@@ -8,32 +7,17 @@ from .utils.script_salvar_log_return_csv import salvar_log_push_xlsx as save_log
 from .utils.utils_limpeza import liberar_memoria_e_limpar_temporarios as clean_files_memory
 
 
-
 # ================== CONFIG ==================
-RABBIT_HOST = "192.168.11.38"
-QUEUE_NAME = "q.push_add"
-RETRY_DELAY = 5
-first = True
 
-RABBIT_USER = "ro.berto"
-RABBIT_PASS = "Jrs-2018"
-
-# 🔥 TRTs que NÃO devem ser processados
-# TRT_EXCECOES = {'5'}   # set é mais rápido que list
-TRT_EXCECOES = {}   # set é mais rápido que list
-
-# ===========================================
+# TRTs que NÃO devem ser processados
+TRT_EXCECOES = {}
 
 TRT_COOLDOWN = {}  # { trt: datetime }
 TRT_COOLDOWN_MINUTES = 10
 
-# ===========================================
-
-# Configure a URL correta do seu ambiente (ex: localhost ou produção)
+# Webhook Django
 API_BASE_URL = "http://192.168.11.24:8000"
-# API_UPDATE_STATUS = f"{API_BASE_URL}/atividades/push/automation/update/status/"
 API_UPDATE_STATUS = f"{API_BASE_URL}/atividades/push/automation/update/status/"
-STATUS_ADD_SYSTEM = True
 
 
 def atualizar_status_sistema(numero_processo, resultado, mensagem):
@@ -98,44 +82,6 @@ def normalizar_resultado(retorno):
     return "ERRO", texto or "Erro não detalhado"
 
 
-def normalizar_resultado_v0(retorno):
-    """
-    Normaliza o retorno da automação.
-    Aceita: dict | str | None
-    Retorna: (RESULTADO, mensagem_normalizada)
-    """
-
-    # 🔹 Caso None
-    if retorno is None:
-        return "ERRO", "Erro não detalhado"
-
-    # 🔹 Caso dict (retorno padrão da automação)
-    if isinstance(retorno, dict):
-        sucesso = bool(retorno.get("sucesso"))
-        texto = retorno.get("mensagem") or ""
-
-    # 🔹 Caso string ou outro tipo
-    else:
-        texto = str(retorno)
-        sucesso = "sucesso" in texto.lower()
-
-    texto = texto.strip()
-    texto_lower = texto.lower()
-
-    # 🔥 REGRA DE NEGÓCIO
-    if "já cadastrado" in texto_lower or "ja cadastrado" in texto_lower:
-        return "AVISO", "Processo já cadastrado"
-
-    if sucesso:
-        return "SUCESSO", texto or "Operação realizada com sucesso"
-
-    if "erro" in texto_lower or "falha" in texto_lower or "não encontrado" in texto_lower:
-        return "ERRO", texto or "Erro retornado pela automação"
-
-    # fallback conservador
-    return "ERRO", texto or "Erro não detalhado"
-
-
 def trt_em_cooldown(trt):
     ate = TRT_COOLDOWN.get(trt)
     if not ate:
@@ -145,119 +91,85 @@ def trt_em_cooldown(trt):
 
 def start_automation(body):
 
-    """ 
+    """
         Example json received
         {
-            'grau': '1', 
-            'tribunal': '6', 
-            'pagina': '', 
-            'numero_processo': '0000511-77.2025.5.06.0018', 
-            'acao': 'create', 
-            'status': '', 
+            'grau': '1',
+            'tribunal': '6',
+            'pagina': '',
+            'numero_processo': '0000511-77.2025.5.06.0018',
+            'acao': 'create',
+            'status': '',
             'msg': ''
         }
     """
 
-    # Sem driver ainda
-    clean_files_memory(driver=None)
-
-    print("🧠 Criando driver Selenium...")
-    driver = criar_driver()
-
-    # automation = AutomacaoPush(driver)
-
-    processo = None
-    trt = None
+    # 1. Parsear payload primeiro (antes de qualquer operação pesada)
+    data = json.loads(body.decode()) if isinstance(body, (bytes, bytearray)) else json.loads(body)
+    processo = data.get("numero_processo")
+    trt = data.get("tribunal")
+    action = data.get("acao")
 
     try:
+        trt = int(trt)
+    except (TypeError, ValueError):
+        trt = None
 
-        data = json.loads(body.decode())
-        processo = data.get("numero_processo")
-        trt = int(data.get("tribunal"))
-        try:
-            grau = "primeirograu" if int(data.get("grau")) == 1 else "segundograu"
-        except Exception as e:
-            print(f'- (except): {e}')
-            grau = "primeirograu"
+    try:
+        grau = "primeirograu" if int(data.get("grau")) == 1 else "segundograu"
+    except (TypeError, ValueError):
+        grau = "primeirograu"
 
-        print(f'- (Dicionário): {data}')
-        print(f'- (Grau): {grau}')
+    print(f'- (Payload): {data}')
+    print(f'- (Processo): {processo} | (TRT): {trt} | (Grau): {grau} | (Acao): {action}')
+
+    driver = None
+
+    try:
+        # 2. Limpeza de memória e temporários
+        clean_files_memory(driver=None)
+
+        # 3. Criar driver Selenium
+        print("Criando driver Selenium...")
+        driver = criar_driver()
+
         automation = AutomacaoPush(driver, trt)
 
         if abrir_pje(driver, trt, grau) is None:
-            messege = 'Falha ao abrir PJe'
-            print(f"- [STATUS]: {messege}")
-            # Encaminhar para o Sistema
-            status_operacao = atualizar_status_sistema(
-                processo, 
-                "ERRO",
-                f"{messege}"
-            )
-            print(f'- (Status Update System): {status_operacao}')
-            return {
-                'data': data,
-                'status': 'error', 
-                'msg': f"{messege}"
-            }
-        
+            msg = 'Falha ao abrir o navegador do PJe'
+            print(f"- [STATUS]: {msg}")
+            atualizar_status_sistema(processo, "ERRO", msg)
+            return {'data': data, 'status': 'error', 'msg': msg}
+
         if not garantir_autenticacao(driver, "paula"):
-            messege = 'Falha ao se autenticar'
-            print(f"- [STATUS]: {messege}")
-            # Encaminhar para o Sistema
-            status_operacao = atualizar_status_sistema(
-                processo, 
-                "ERRO",
-                f"{messege}"
-            )
-            print(f'- (Status Update System): {status_operacao}')
-            return {
-                'data': data,
-                'status': 'error', 
-                'msg': f"{messege}"
-            }
-        
-        
+            msg = 'Falha ao se autenticar no PJe'
+            print(f"- [STATUS]: {msg}")
+            atualizar_status_sistema(processo, "ERRO", msg)
+            return {'data': data, 'status': 'error', 'msg': msg}
+
         if clicar_meu_painel(driver) is None:
-            messege = 'Falha ao clicar no Menu do PJe'
-            print(f"- [STATUS]: {messege}")
-            # Encaminhar para o Sistema
-            status_operacao = atualizar_status_sistema(
-                processo, 
-                "ERRO", 
-                f"{messege}"
-            )
-            print(f'- (Status Update System): {status_operacao}')
-            return {
-                'data': data,
-                'status': 'error', 
-                'msg': f"{messege}"
-            }
-        
+            msg = 'Falha ao acessar o painel do PJe'
+            print(f"- [STATUS]: {msg}")
+            atualizar_status_sistema(processo, "ERRO", msg)
+            return {'data': data, 'status': 'error', 'msg': msg}
+
         garantir_perfil(driver, "Advogado")
 
-        action = data.get("acao")
-        print(f'- (AÇÃO): {action}')
+        print(f'- (ACAO): {action}')
 
         if action == 'create':
             mensagem = automation.function_main_cad_push(processo, None)
-
         elif action == 'delete':
             mensagem = automation.function_main_del_push(processo, None)
-
         else:
-            messege = 'Action inválido.'
-            print(f"- [STATUS]: {messege}")
-            return {
-                'data': data,
-                'status': 'error', 
-                'msg': f"{messege}"
-            }
-            
+            msg = f'Acao invalida: {action}'
+            print(f"- [STATUS]: {msg}")
+            atualizar_status_sistema(processo, "ERRO", msg)
+            return {'data': data, 'status': 'error', 'msg': msg}
 
         resultado, mensagem_normalizada = normalizar_resultado(mensagem)
         print(f'- (STATUS): {resultado} | {mensagem_normalizada}')
 
-        # 1. Salva log local (seu código atual)
         save_log(
             tribunal=f"TRT{trt}",
             numero_processo=processo,
@@ -265,21 +177,19 @@ def start_automation(body):
             mensagem=mensagem_normalizada,
         )
 
-        if STATUS_ADD_SYSTEM:
-            # 2. CHAMADA NOVA: Atualiza o sistema
-            status_operacao = atualizar_status_sistema(
-                processo, 
-                resultado, 
-                mensagem_normalizada
-            )
-            print(f'- (Status da operação): {status_operacao}')
+        atualizar_status_sistema(processo, resultado, mensagem_normalizada)
+
+        return {
+            'data': data,
+            'status': f'{resultado}',
+            'msg': f"{mensagem_normalizada}"
+        }
 
     except Exception as e:
 
-        erro_txt = f"Exceção não tratada: {e}"
-        print(f"❌ {erro_txt}")
+        erro_txt = f"Erro na automacao: {e}"
+        print(f"[ERRO] {erro_txt}")
 
-        # 🔥 LOGA O ERRO CRÍTICO
         save_log(
             tribunal=trt,
             numero_processo=processo,
@@ -287,15 +197,9 @@ def start_automation(body):
             mensagem=erro_txt,
         )
 
-        if STATUS_ADD_SYSTEM:
-            # Tenta avisar o sistema sobre o erro crítico também
-            atualizar_status_sistema(
-                processo, 
-                "ERRO", 
-                erro_txt
-            )
+        atualizar_status_sistema(processo, "ERRO", erro_txt)
 
-        time.sleep(RETRY_DELAY)
+        return {'data': data, 'status': 'error', 'msg': erro_txt}
 
-
-    clean_files_memory(driver)
+    finally:
+        clean_files_memory(driver=driver)

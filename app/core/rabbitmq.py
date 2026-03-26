@@ -15,8 +15,6 @@ class Rabbitmq():
         self.__vhost = os.getenv("VHOST")
         self.__username = os.getenv("USER")
         self.__password = os.getenv("PASSWORD")
-        self.__queue_received_push = os.getenv("QUEUE_RECEIVED_EVENT_PUSH")
-        self.__queue_return_status_push = os.getenv("QUEUE_RETURN_EVENT_STATUS_PUSH")
         self.__callback = callback
         self.__channel = self.__create_channel()
 
@@ -36,17 +34,12 @@ class Rabbitmq():
         return channel
 
     def consumer(self, queue, callback=None):
-        # Declarar uma Fila (queue_declare)
-        self.__channel.queue_declare(
-            queue=queue,
-            durable=True
-        )
-        # O parâmetro durable=True garante que a fila sobreviva caso o RabbitMQ seja reiniciado.
-
+        self.__channel.queue_declare(queue=queue, durable=True)
+        self.__channel.basic_qos(prefetch_count=1)
         self.__channel.basic_consume(
             queue=queue,
             on_message_callback=self.__callback if self.__callback else callback,
-            auto_ack=True
+            auto_ack=False
         )
 
     def publisher(self, body, routing_key):
