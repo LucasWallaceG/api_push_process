@@ -73,11 +73,11 @@ def normalizar_resultado(retorno):
     if "já cadastrado" in texto:
         return "AVISO", "Processo já cadastrado"
 
-    if sucesso:
-        return "SUCESSO", texto
-
     if "erro" in texto or "falha" in texto or "não encontrado" in texto:
         return "ERRO", texto
+
+    if sucesso:
+        return "SUCESSO", texto
 
     return "ERRO", texto or "Erro não detalhado"
 
@@ -187,19 +187,20 @@ def start_automation(body):
 
     except Exception as e:
 
-        erro_txt = f"Erro na automacao: {e}"
-        print(f"[ERRO] {erro_txt}")
+        print(f"[ERRO] Erro na automacao: {e}")
+
+        msg_erro = "Erro interno na automacao"
 
         save_log(
             tribunal=trt,
             numero_processo=processo,
             resultado="ERRO",
-            mensagem=erro_txt,
+            mensagem=msg_erro,
         )
 
-        atualizar_status_sistema(processo, "ERRO", erro_txt)
+        atualizar_status_sistema(processo, "ERRO", msg_erro)
 
-        return {'data': data, 'status': 'error', 'msg': erro_txt}
+        return {'data': data, 'status': 'error', 'msg': msg_erro}
 
     finally:
         clean_files_memory(driver=driver)

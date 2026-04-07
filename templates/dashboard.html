@@ -259,6 +259,26 @@
         <!-- FILTERS -->
         <div class="filters">
             <div class="filter-group">
+                <label>Periodo</label>
+                <select id="filter-periodo">
+                    <option value="">Hoje</option>
+                    <option value="ontem">Ontem</option>
+                    <option value="7">Ult. 7 dias</option>
+                    <option value="15">Ult. 15 dias</option>
+                    <option value="30">Ult. 30 dias</option>
+                    <option value="45">Ult. 45 dias</option>
+                    <option value="60">Ult. 60 dias</option>
+                </select>
+            </div>
+            <div class="filter-group">
+                <label>Data Inicial</label>
+                <input type="date" id="filter-data-inicio">
+            </div>
+            <div class="filter-group">
+                <label>Data Final</label>
+                <input type="date" id="filter-data-fim">
+            </div>
+            <div class="filter-group">
                 <label>Status</label>
                 <select id="filter-status">
                     <option value="">Todos</option>
@@ -320,6 +340,44 @@
     <script>
         const POLL_INTERVAL = 3000;
         let allData = [];
+
+        function toISODate(date) {
+            const y = date.getFullYear();
+            const m = String(date.getMonth() + 1).padStart(2, '0');
+            const d = String(date.getDate()).padStart(2, '0');
+            return `${y}-${m}-${d}`;
+        }
+
+        function calcDateRange() {
+            const periodo = document.getElementById('filter-periodo').value;
+            const inputInicio = document.getElementById('filter-data-inicio').value;
+            const inputFim = document.getElementById('filter-data-fim').value;
+
+            // Inputs de data tem prioridade quando preenchidos
+            if (inputInicio || inputFim) {
+                return { data_inicio: inputInicio || '', data_fim: inputFim || '' };
+            }
+
+            const hoje = new Date();
+
+            if (periodo === 'ontem') {
+                const ontem = new Date(hoje);
+                ontem.setDate(ontem.getDate() - 1);
+                const d = toISODate(ontem);
+                return { data_inicio: d, data_fim: d };
+            }
+
+            if (periodo && !isNaN(periodo)) {
+                const dias = parseInt(periodo);
+                const inicio = new Date(hoje);
+                inicio.setDate(inicio.getDate() - dias);
+                return { data_inicio: toISODate(inicio), data_fim: toISODate(hoje) };
+            }
+
+            // Padrao: hoje
+            const d = toISODate(hoje);
+            return { data_inicio: d, data_fim: d };
+        }
 
         function badgeClass(status) {
             const map = {
@@ -421,15 +479,23 @@
         }
 
         function clearFilters() {
+            document.getElementById('filter-periodo').value = '';
+            document.getElementById('filter-data-inicio').value = '';
+            document.getElementById('filter-data-fim').value = '';
             document.getElementById('filter-status').value = '';
             document.getElementById('filter-trt').value = '';
             document.getElementById('filter-processo').value = '';
-            renderTable(allData);
+            fetchDashboard();
         }
 
         async function fetchDashboard() {
             try {
-                const res = await fetch('/api/dashboard');
+                const range = calcDateRange();
+                const params = new URLSearchParams();
+                if (range.data_inicio) params.set('data_inicio', range.data_inicio);
+                if (range.data_fim) params.set('data_fim', range.data_fim);
+
+                const res = await fetch('/api/dashboard?' + params.toString());
                 const json = await res.json();
                 allData = json.registros || [];
 
@@ -446,7 +512,24 @@
             }
         }
 
-        // Filters: re-render on change
+        // Filtros de periodo: recarregam dados do servidor
+        document.getElementById('filter-periodo').addEventListener('change', () => {
+            // Limpar inputs de data ao selecionar periodo por atalho
+            document.getElementById('filter-data-inicio').value = '';
+            document.getElementById('filter-data-fim').value = '';
+            fetchDashboard();
+        });
+        document.getElementById('filter-data-inicio').addEventListener('change', () => {
+            // Limpar select de periodo ao usar datas manuais
+            document.getElementById('filter-periodo').value = '';
+            fetchDashboard();
+        });
+        document.getElementById('filter-data-fim').addEventListener('change', () => {
+            document.getElementById('filter-periodo').value = '';
+            fetchDashboard();
+        });
+
+        // Filtros locais: re-render na tabela existente
         document.getElementById('filter-status').addEventListener('change', () => renderTable(allData));
         document.getElementById('filter-trt').addEventListener('change', () => renderTable(allData));
         document.getElementById('filter-processo').addEventListener('input', () => renderTable(allData));

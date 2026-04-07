@@ -4,9 +4,13 @@ import threading
 from datetime import datetime
 from flask import Flask, jsonify, request, render_template
 from app.core.rabbitmq import Rabbitmq
+from app.core.database import init_db, salvar_registro, buscar_registros
 from app.automation import main
 
 app = Flask(__name__)
+
+# --- INICIALIZAR BANCO DE DADOS ---
+init_db()
 
 # --- TRACKING DE PROCESSOS ---
 registros = []
@@ -25,6 +29,7 @@ def registrar(processo, trt, grau, acao, status, msg=""):
                 r["status"] = status
                 r["msg"] = msg
                 r["data_hora"] = datetime.now().isoformat()
+                salvar_registro(r)
                 return r
 
         registro = {
@@ -38,11 +43,15 @@ def registrar(processo, trt, grau, acao, status, msg=""):
             "data_hora": datetime.now().isoformat(),
         }
         registros.insert(0, registro)
+
+        # Persistir no SQLite
+        salvar_registro(registro)
+
         return registro
 
 
 # --- CALLBACK DO CONSUMER ---
-def callback_start_automacao(ch, method, properties, body):
+def callback_start_automacao(ch, method, _properties, body):
     print(f'- [Consumer][received_push]: {body}')
     print('- (Status): Iniciando a automacao ...')
 
@@ -76,7 +85,7 @@ def callback_start_automacao(ch, method, properties, body):
 
     except Exception as e:
         print(f'- (Erro critico no callback): {e}')
-        registrar(processo, trt, grau, acao, "ERRO", str(e))
+        registrar(processo, trt, grau, acao, "ERRO", "Erro interno na automacao")
     finally:
         ch.basic_ack(delivery_tag=method.delivery_tag)
         print('- (ACK): Mensagem confirmada na fila.')
@@ -98,8 +107,11 @@ def dashboard():
 
 @app.route('/api/dashboard')
 def api_dashboard():
-    with _lock:
-        return jsonify({"registros": registros})
+    data_inicio = request.args.get('data_inicio')
+    data_fim = request.args.get('data_fim')
+
+    registros_db = buscar_registros(data_inicio, data_fim)
+    return jsonify({"registros": registros_db})
 
 
 @app.route('/push/received', methods=['GET'])
