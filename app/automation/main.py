@@ -157,10 +157,12 @@ def start_automation(body):
 
         print(f'- (ACAO): {action}')
 
+        pagina = data.get("pagina") or ""
+
         if action == 'create':
             mensagem = automation.function_main_cad_push(processo, None)
         elif action == 'delete':
-            mensagem = automation.function_main_del_push(processo, None)
+            mensagem = automation.function_main_del_push(pagina, processo, None)
         else:
             msg = f'Acao invalida: {action}'
             print(f"- [STATUS]: {msg}")

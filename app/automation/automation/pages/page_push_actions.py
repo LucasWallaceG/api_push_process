@@ -1497,9 +1497,10 @@ class AutomacaoPush:
             page_atual=self.pagina_atual,
         )
 
-        ok = scraper.ir_para_pagina_inteligente(pagina, total_tela=total_tela, itens_por_pagina=50, timeout=20)
+        pagina_destino = int(pagina) if str(pagina).strip().isdigit() else 1
+        ok = scraper.ir_para_pagina_inteligente(pagina_destino, total_tela=total_tela, itens_por_pagina=50, timeout=20)
         if not ok:
-            print(f"[WARN] Não foi possível navegar até a página {pagina}.")
+            print(f"[WARN] Não foi possível navegar até a página {pagina_destino}.")
 
         # resultado = scraper.localizar_processo(numero_processo)
         row = scraper.localizar_processo_com_fallback(numero_processo)
