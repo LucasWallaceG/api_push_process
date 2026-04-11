@@ -1439,7 +1439,84 @@ class AutomacaoPush:
         return msg_return
 
 
-    def function_main_del_push(self, pagina, numero_processo, context):
+    def function_main_del_push(self, pagina, numero_processo):
+
+        get_except = False
+        print(f'- (PÁGINA): {pagina}')
+
+        # MEU PAINAL -> Tratar avisos
+        self.safe_click(self.BTN_MEU_PAINEL, 5)
+
+        try:
+            # MENU COMPLETO
+            self.safe_click(self.BTN_MENU_COMPLETO, 5)
+        except Exception as e:
+            print(f'- (Elemento não localizado)[BTN_MENU_COMPLETO]: {e}')
+            get_except = True
+
+            # MENU PUSH
+            self.safe_click(self.BTN_PUSH_MENU, 5)
+
+
+        if get_except is False:
+
+            # CADASTRO
+            # self.safe_click(self.BTN_CADASTRO, 5)
+            if not self.safe_click(self.BTN_CADASTRO):
+                raise RuntimeError("Contexto inválido para BTN_CADASTRO")
+
+            # PUSH
+            self.safe_click(self.BTN_PUSH, 5)
+
+
+        # 🔥 AUMENTA ITENS POR PÁGINA
+        self.aumentar_itens_por_pagina()
+
+        # ⏳ Aguarda página carregar novamente
+        self.wait_pagina_carregada()
+
+        # 🔢 Total informado pela tela
+        total_tela = self.obter_total_registros_tela()
+        print(f'- (Qtd. Itens): {total_tela}')
+
+        # self.ir_para_pagina_json(pagina, 10)
+
+        # =================================================
+        # 🔥 EXTRAÇÃO DE DADOS APÓS ENTRAR EM PUSH
+        # =================================================
+        print("[INFO] Iniciando extração dos dados da tabela PUSH...")
+
+        scraper = ProcessosScraper(
+            self.driver,
+            self.trt,
+            chaves_unicas=set(),
+            data_execucao=None,
+            timeout=20,
+            page_atual=self.pagina_atual,
+        )
+
+        ok = scraper.ir_para_pagina_inteligente(pagina, total_tela=total_tela, itens_por_pagina=50, timeout=20)
+        if not ok:
+            print(f"[WARN] Não foi possível navegar até a página {pagina}.")
+
+        # resultado = scraper.localizar_processo(numero_processo)
+        row = scraper.localizar_processo_com_fallback(numero_processo)
+        if not row:
+            return {
+                "resultado": "NAO_ENCONTRADO",
+                "mensagem": "Processo não localizado após reordenação"
+            }
+
+        if not scraper.clicar_excluir_da_linha(row):
+            return {"sucesso": False, "mensagem": "Falha ao clicar em excluir"}
+
+        msg = self.capturar_mensagem_feedback(5)
+        print(f'- (Msg): {msg}')
+
+        return msg
+
+
+    def function_main_del_push_v0(self, pagina, numero_processo, context):
 
         get_except = False
 
