@@ -527,7 +527,8 @@ class ProcessosScraper:
         try:
             pagina_destino = int(pagina_destino)
         except (TypeError, ValueError):
-            raise Exception(f"Página inválida: {pagina_destino!r}")
+            return None
+            # raise Exception(f"Página inválida: {pagina_destino!r}")
 
         if pagina_destino < 1:
             pagina_destino = 1
