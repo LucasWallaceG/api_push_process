@@ -70,12 +70,25 @@ source venv/bin/activate
 # Instale as dependências
 pip install -r requirements.txt
 🚦 Como Executar
-Para rodar o projeto completo (API + Worker), execute o arquivo principal:
 
-Bash
+**API + Worker unificado (produção atual):**
+```bash
 python main.py
+```
+
+**Consumers dedicados por operação (filas separadas):**
+```bash
+# Processa cadastros — fila: q.push_add
+python consumer_cadastrar_push.py
+
+# Processa exclusões — fila: q.push_delet
+python consumer_excluir_push.py
+```
+
+Cada consumer pode ser executado em máquinas separadas para escalar o processamento em lote.
+
 Simulando um envio de dados (Postman/cURL):
-Bash
+```bash
 curl -X POST http://localhost:5000/push/received \
      -H "Content-Type: application/json" \
      -d '{
@@ -83,6 +96,7 @@ curl -X POST http://localhost:5000/push/received \
            "tribunal": "6",
            "acao": "create"
          }'
+```
 📝 Padrões de Projeto Aplicados
 Page Object Model (POM): Organização da automação web por páginas.
 
