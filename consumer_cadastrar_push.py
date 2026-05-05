@@ -17,7 +17,7 @@ RABBIT_VHOST = os.getenv("VHOST", "/myvhost")
 RABBIT_USER = os.getenv("USER", "ro.berto")
 RABBIT_PASS = os.getenv("PASSWORD", "Jrs-2018")
 
-QUEUE_NAME = "q.push_add"
+QUEUE_NAME = "queue_push_insert"
 RETRY_DELAY = 5
 # ============================================
 
