@@ -8,9 +8,10 @@ PYTHON = sys.executable
 
 def abrir_terminal(titulo, script):
     caminho = os.path.join(BASE_DIR, script)
+    ps_cmd = f"$Host.UI.RawUI.WindowTitle = '{titulo}'; & '{PYTHON}' '{caminho}'"
     subprocess.Popen(
-        f'start "{titulo}" cmd /k "{PYTHON}" "{caminho}"',
-        shell=True,
+        ['powershell', '-NoExit', '-Command', ps_cmd],
+        creationflags=subprocess.CREATE_NEW_CONSOLE,
         cwd=BASE_DIR,
     )
 
