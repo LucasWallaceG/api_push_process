@@ -71,23 +71,37 @@ source venv/bin/activate
 pip install -r requirements.txt
 🚦 Como Executar
 
-**API + Worker unificado (produção atual):**
+**Recomendado — iniciar todos os serviços de uma vez:**
 ```bash
-python main.py
+python start_all.py
 ```
+Abre automaticamente três terminais separados:
 
-**Consumers dedicados por operação (filas separadas):**
+| Terminal | Serviço | Detalhe |
+|---|---|---|
+| 1 | Dashboard Flask | `http://localhost:5000` |
+| 2 | Consumer Cadastro | fila `queue_push_insert` |
+| 3 | Consumer Exclusão | fila `queue_push_delete` |
+
+---
+
+**Execução individual (opcional):**
 ```bash
-# Processa cadastros — fila: q.push_add
+# Somente o dashboard visual (Flask)
+python main.py
+
+# Somente o consumer de cadastros
 python consumer_cadastrar_push.py
 
-# Processa exclusões — fila: q.push_delet
+# Somente o consumer de exclusões
 python consumer_excluir_push.py
 ```
 
-Cada consumer pode ser executado em máquinas separadas para escalar o processamento em lote.
+> Cada consumer pode ser executado em máquinas separadas para escalar o processamento em lote.
 
-Simulando um envio de dados (Postman/cURL):
+---
+
+**Simulando um envio de dados (Postman/cURL):**
 ```bash
 curl -X POST http://localhost:5000/push/received \
      -H "Content-Type: application/json" \

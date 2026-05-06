@@ -180,10 +180,5 @@ def send_push_queue():
 
 
 if __name__ == '__main__':
-    # Thread do consumer RabbitMQ (nao trava a API)
-    t = threading.Thread(target=start_consumer, daemon=True)
-    t.start()
-
-    # API Flask (fluxo principal)
     print(" [API] Flask rodando na porta 5000...")
     app.run(host="0.0.0.0", port=5000, debug=True, use_reloader=False)
