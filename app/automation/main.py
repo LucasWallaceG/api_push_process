@@ -1,8 +1,9 @@
 import json
 import requests
+from datetime import date
 from .Models.scripts_pje import *
 from .utils.script_acessar_pje import preparar_ambiente
-from .automation.pages.page_push_actions import AutomacaoPush
+from .automation.pages.page_push_actions import AutomacaoPush, ProcessosScraper
 from .utils.script_salvar_log_return_csv import salvar_log_push_xlsx as save_log
 from .utils.utils_limpeza import liberar_memoria_e_limpar_temporarios as clean_files_memory
 
@@ -54,6 +55,58 @@ def atualizar_status_sistema(numero_processo, resultado, mensagem):
 def extrair_trt_do_processo(numero_processo):
     partes = numero_processo.split(".")
     return str(int(partes[3]))
+
+
+def carregar_json_paginacao(trt):
+    hoje = date.today().isoformat()
+    path = f"processos_push_{hoje}.json"
+
+    if not os.path.exists(path):
+        return {}
+
+    with open(path, "r", encoding="utf-8") as f:
+        dados = json.load(f)
+
+    mapa = {}
+    for item in dados:
+        if item.get("tribunal") == f"TRT{trt}":
+            mapa[item["numero_processo"]] = int(item["pagina"])
+
+    return mapa
+
+
+def localizar_e_deletar_processo(automation, trt, processo):
+
+    json_paginas = carregar_json_paginacao(trt)
+    pagina_sugerida = json_paginas.get(processo)
+
+    scraper = ProcessosScraper(
+        automation.driver,
+        trt,
+        chaves_unicas=set(),
+        data_execucao=None
+    )
+
+    # 🔹 tenta via JSON
+    if pagina_sugerida:
+        print(f"[INFO] Página sugerida pelo JSON: {pagina_sugerida}")
+        automation.ir_para_pagina_json(pagina_sugerida)
+
+        achado = scraper.localizar_processo(processo)
+        if achado:
+            automation.deletar_linha(achado["row"])
+            return True, "Deletado com base na página do JSON"
+
+    # 🔹 fallback
+    print("[INFO] Fallback: busca sequencial")
+    scraper.page = 1
+    achado = scraper.localizar_processo(processo)
+
+    if achado:
+        automation.deletar_linha(achado["row"])
+        return True, "Deletado após busca sequencial"
+
+    return False, "Processo não localizado"
 
 
 def normalizar_resultado(retorno):
@@ -171,6 +224,25 @@ def start_automation(body):
 
         resultado, mensagem_normalizada = normalizar_resultado(mensagem)
         print(f'- (STATUS): {resultado} | {mensagem_normalizada}')
+
+        if resultado == 'ERRO':
+            print('- (Status): Tentar busca completa')
+            sucesso, mensagem = localizar_e_deletar_processo(
+                automation,
+                trt,
+                processo
+            )
+            print(f'- (STATUS): {sucesso}')
+            print(f'- (MSG): {mensagem}')
+
+            if sucesso:
+                resultado = "SUCESSO"
+
+            if "erro" in str(mensagem).lower() or "falha" in str(mensagem).lower() or "não encontrado" in str(mensagem).lower():
+                resultado = "ERRO"
+
+            mensagem_normalizada = mensagem
+
 
         save_log(
             tribunal=f"TRT{trt}",
