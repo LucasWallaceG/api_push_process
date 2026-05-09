@@ -225,7 +225,7 @@ def start_automation(body):
         resultado, mensagem_normalizada = normalizar_resultado(mensagem)
         print(f'- (STATUS): {resultado} | {mensagem_normalizada}')
 
-        if resultado == 'ERRO':
+        if resultado == 'ERRO' and action == 'delete':
             print('- (Status): Tentar busca completa')
             sucesso, mensagem = localizar_e_deletar_processo(
                 automation,
