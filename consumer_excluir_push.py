@@ -1,7 +1,6 @@
 import os
 import sys
 import json
-import time
 import threading
 import pika
 from datetime import datetime
@@ -45,7 +44,7 @@ def _registrar(processo, trt, grau, acao, status, msg=""):
     salvar_registro(registro)
 
 
-def callback(ch, method, properties, body):
+def callback(ch, method, _properties, body):
     processo = None
 
     try:
@@ -74,6 +73,7 @@ def callback(ch, method, properties, body):
     except Exception as e:
         print(f"[ERRO CRITICO] {e}")
         if processo:
+            automacao.atualizar_status_sistema(processo, "ERRO", str(e))
             _registrar(processo, None, None, "delete", "ERRO", str(e))
         ch.basic_ack(delivery_tag=method.delivery_tag)
 

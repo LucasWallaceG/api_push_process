@@ -277,4 +277,7 @@ def start_automation(body):
         return {'data': data, 'status': 'error', 'msg': msg_erro}
 
     finally:
-        clean_files_memory(driver=driver)
+        try:
+            clean_files_memory(driver=driver)
+        except Exception as cleanup_err:
+            print(f"⚠️ Erro ao liberar recursos: {cleanup_err}")
