@@ -46,6 +46,7 @@ def _registrar(processo, trt, grau, acao, status, msg=""):
 
 def callback(ch, method, _properties, body):
     processo = None
+    data = {}
 
     try:
         data = json.loads(body.decode()) if isinstance(body, (bytes, bytearray)) else json.loads(body)
@@ -73,7 +74,7 @@ def callback(ch, method, _properties, body):
     except Exception as e:
         print(f"[ERRO CRITICO] {e}")
         if processo:
-            automacao.atualizar_status_sistema(processo, "ERRO", str(e))
+            automacao.atualizar_status_sistema(data, "ERRO", str(e))
             _registrar(processo, None, None, "delete", "ERRO", str(e))
         ch.basic_ack(delivery_tag=method.delivery_tag)
 

@@ -16,39 +16,52 @@ TRT_EXCECOES = {}
 TRT_COOLDOWN = {}  # { trt: datetime }
 TRT_COOLDOWN_MINUTES = 10
 
-# Webhook Django
+# Webhook Django (fallback quando a mensagem não traz callback_url)
 API_BASE_URL = "http://192.168.11.24:8000"
-API_UPDATE_STATUS = f"{API_BASE_URL}/atividades/push/automation/update/status/"
+DJANGO_WEBHOOK_URL = f"{API_BASE_URL}/atividades/push/automation/update/status/"
 
 
-def atualizar_status_sistema(numero_processo, resultado, mensagem):
+def atualizar_status_sistema(data, resultado, mensagem):
     """
-    Envia o status da automação para o sistema Django atualizar a tabela.
+    Posta o resultado no sistema de origem.
+    - Se a mensagem trouxer callback_url (tarefas-jrs): usa essa URL e o contrato
+      {id, status, token}.
+    - Sem callback_url: mantém o comportamento legado com o Django.
     """
-    status_map = {
-        "SUCESSO": "SUCCESS",
-        "AVISO": "SUCCESS",  # Consideramos aviso como sucesso de cadastro? Ou crie um status 'WARNING'
-        "ERRO": "ERROR"
-    }
+    if not isinstance(data, dict):
+        data = {}
 
-    status_django = status_map.get(resultado, "ERROR")
+    numero_processo = data.get("numero_processo")
+    callback_url = data.get("callback_url")
 
-    payload = {
-        "processo": numero_processo,
-        "status": status_django,
-        "message": mensagem
-    }
+    if callback_url:
+        # Contrato tarefas-jrs: ecoar id como string, sem cast
+        payload = {
+            "id":     data.get("id"),
+            "status": resultado,          # "SUCESSO" | "ERRO" (exato)
+            "token":  data.get("token"),
+        }
+        url = callback_url
+    else:
+        # Contrato Django legado (retrocompatível)
+        status_map = {"SUCESSO": "SUCCESS", "AVISO": "SUCCESS", "ERRO": "ERROR"}
+        payload = {
+            "processo": numero_processo,
+            "status":   status_map.get(resultado, "ERROR"),
+            "message":  mensagem,
+        }
+        url = DJANGO_WEBHOOK_URL
 
     try:
-        response = requests.post(API_UPDATE_STATUS, json=payload, timeout=10)
+        response = requests.post(url, json=payload, timeout=10)
         if response.status_code == 200:
-            print(f"✅ Status atualizado no sistema: {numero_processo} -> {status_django}")
+            print(f"✅ Webhook enviado: {numero_processo} -> {resultado}")
             return True
         else:
-            print(f"⚠️ Falha ao atualizar sistema: {response.status_code} - {response.text}")
+            print(f"⚠️ Falha no webhook: {response.status_code} - {response.text}")
             return False
     except Exception as e:
-        print(f"❌ Erro ao chamar API do sistema: {e}")
+        print(f"❌ Erro ao chamar webhook: {e}")
         return False
 
 
@@ -191,20 +204,20 @@ def start_automation(body):
         if abrir_pje(driver, trt, grau) is None:
             msg = 'Falha ao abrir o navegador do PJe'
             print(f"- [STATUS]: {msg}")
-            atualizar_status_sistema(processo, "ERRO", msg)
-            return {'data': data, 'status': 'error', 'msg': msg}
+            atualizar_status_sistema(data, "ERRO", msg)
+            return {'data': data, 'status': 'ERRO', 'msg': msg}
 
         if not garantir_autenticacao(driver, "paula"):
             msg = 'Falha ao se autenticar no PJe'
             print(f"- [STATUS]: {msg}")
-            atualizar_status_sistema(processo, "ERRO", msg)
-            return {'data': data, 'status': 'error', 'msg': msg}
+            atualizar_status_sistema(data, "ERRO", msg)
+            return {'data': data, 'status': 'ERRO', 'msg': msg}
 
         if clicar_meu_painel(driver) is None:
             msg = 'Falha ao acessar o painel do PJe'
             print(f"- [STATUS]: {msg}")
-            atualizar_status_sistema(processo, "ERRO", msg)
-            return {'data': data, 'status': 'error', 'msg': msg}
+            atualizar_status_sistema(data, "ERRO", msg)
+            return {'data': data, 'status': 'ERRO', 'msg': msg}
 
         garantir_perfil(driver, "Advogado")
 
@@ -219,8 +232,8 @@ def start_automation(body):
         else:
             msg = f'Acao invalida: {action}'
             print(f"- [STATUS]: {msg}")
-            atualizar_status_sistema(processo, "ERRO", msg)
-            return {'data': data, 'status': 'error', 'msg': msg}
+            atualizar_status_sistema(data, "ERRO", msg)
+            return {'data': data, 'status': 'ERRO', 'msg': msg}
 
         resultado, mensagem_normalizada = normalizar_resultado(mensagem)
         print(f'- (STATUS): {resultado} | {mensagem_normalizada}')
@@ -251,7 +264,7 @@ def start_automation(body):
             mensagem=mensagem_normalizada,
         )
 
-        atualizar_status_sistema(processo, resultado, mensagem_normalizada)
+        atualizar_status_sistema(data, resultado, mensagem_normalizada)
 
         return {
             'data': data,
@@ -272,9 +285,9 @@ def start_automation(body):
             mensagem=msg_erro,
         )
 
-        atualizar_status_sistema(processo, "ERRO", msg_erro)
+        atualizar_status_sistema(data, "ERRO", msg_erro)
 
-        return {'data': data, 'status': 'error', 'msg': msg_erro}
+        return {'data': data, 'status': 'ERRO', 'msg': msg_erro}
 
     finally:
         try:
