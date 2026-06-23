@@ -74,7 +74,7 @@ def callback(ch, method, _properties, body):
     except Exception as e:
         print(f"[ERRO CRITICO] {e}")
         if processo:
-            automacao.atualizar_status_sistema(data, "ERRO", str(e))
+            automacao.enviar_retornos(data, "ERRO", str(e))
             _registrar(processo, None, None, "delete", "ERRO", str(e))
         ch.basic_ack(delivery_tag=method.delivery_tag)
 
