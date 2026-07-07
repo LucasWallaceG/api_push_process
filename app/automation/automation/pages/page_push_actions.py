@@ -1147,7 +1147,12 @@ class AutomacaoPush:
         """
 
         seletores = [
-            # Angular Material Snackbar
+            # Angular Material Snackbar do PJe — span EXATO da mensagem
+            # (evita colar o "X" do botao de fechar no texto capturado).
+            (By.CSS_SELECTOR, "simple-snack-bar > span"),
+            (By.CSS_SELECTOR, ".mat-simple-snackbar > span"),
+
+            # Container do snackbar (fallback — pode incluir o "X" do botao)
             (By.CSS_SELECTOR, "snack-bar-container"),
             (By.CSS_SELECTOR, ".mat-snack-bar-container"),
 
@@ -1173,6 +1178,13 @@ class AutomacaoPush:
                         # re-localiza imediatamente
                         elemento = self.driver.find_element(by, selector)
                         texto = elemento.text.strip()
+
+                    # Se caiu num seletor de container, o texto do botao de
+                    # fechar ("X") vem colado ao final — remove para nao poluir.
+                    if texto.endswith("\nX"):
+                        texto = texto[:-2].strip()
+                    elif texto.endswith(" X"):
+                        texto = texto[:-2].strip()
 
                     if texto:
                         if verbose:
@@ -1473,13 +1485,11 @@ class AutomacaoPush:
         # ⏳ Aguarda página carregar novamente
         self.wait_pagina_carregada()
 
-        # 🔄 Recarrega a página
-        # self.driver.refresh()
-        self.close_modal()
-
-        # ⏳ Aguarda página carregar novamente
-        self.wait_pagina_carregada()
-
+        # 🔎 IMPORTANTE: capturar a mensagem ANTES de fechar o modal.
+        # O snackbar de sucesso some em poucos segundos e o close_modal()
+        # pode bloquear ate ~10s aguardando um botao de fechar que ja nao
+        # existe (no sucesso o modal fecha sozinho). Se deixassemos para
+        # depois, o snackbar sumiria e cairia sempre na validacao por total.
         msg_return = self.capturar_feedback_ou_validar_total(
             total_anterior=total_antes
         )
@@ -1493,6 +1503,13 @@ class AutomacaoPush:
             )
         except Exception as e:
             print(f"⚠️ Falha ao capturar screenshot de sucesso: {e}")
+
+        # 🔄 Agora sim: fecha o modal (se ainda aberto) e aguarda estabilizar.
+        # self.driver.refresh()
+        self.close_modal()
+
+        # ⏳ Aguarda página carregar novamente
+        self.wait_pagina_carregada()
 
         # msg = self.capturar_mensagem_feedback(5)
         # print(f'- (Msg): {msg}')

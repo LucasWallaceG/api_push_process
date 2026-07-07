@@ -42,7 +42,24 @@ def capturar_screenshot(driver, processo, acao, status) -> str:
         nome = f"{_slug(processo)}_{_slug(acao)}_{_slug(status)}_{carimbo}.png"
         caminho = os.path.join(SCREENSHOT_DIR, nome)
 
-        driver.save_screenshot(caminho)
+        # Print da AREA DE TRABALHO INTEIRA (todos os monitores), para nao
+        # cortar trechos da pagina e incluir a barra de tarefas (data/hora da
+        # ocorrencia). O navegador roda visivel/maximizado, entao o desktop
+        # reflete a tela do PJe. Se falhar (ex.: ambiente sem display), cai
+        # para o print do proprio navegador via Selenium.
+        capturado = False
+        try:
+            from PIL import ImageGrab
+
+            imagem = ImageGrab.grab(all_screens=True)
+            imagem.save(caminho)
+            capturado = True
+        except Exception as e:
+            print(f"⚠️ Print do desktop indisponivel ({e}); usando print do navegador.")
+
+        if not capturado:
+            driver.save_screenshot(caminho)
+
         print(f"📸 Screenshot salvo: {nome}")
 
         return f"{URL_PREFIX}/{nome}"
