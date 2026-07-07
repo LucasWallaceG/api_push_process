@@ -5,6 +5,7 @@ import requests
 from datetime import date
 from app.core.screenshots import capturar_screenshot
 from .Models.scripts_pje import *
+from .utils.pje_push_api import inativar_push_por_codigo, consultar_codigo_push
 from .utils.script_acessar_pje import preparar_ambiente
 from .automation.pages.page_push_actions import AutomacaoPush, ProcessosScraper
 from .utils.script_salvar_log_return_csv import salvar_log_push_xlsx as save_log
@@ -77,14 +78,15 @@ def _url_absoluta_screenshot(screenshot):
     return f"{_public_base_url()}{screenshot}"
 
 
-def enviar_retornos(data, resultado, mensagem, screenshot_url=None):
+def enviar_retornos(data, resultado, mensagem, screenshot_url=None, codigo=None):
     """
     Posta o resultado em cada destino da lista callbacks da mensagem.
-    - callbacks presente → POST {id, status, message, token, screenshot} em cada item.
-    - callbacks ausente/vazio → fallback Django legado (processo/status/message/screenshot).
+    - callbacks presente → POST {id, status, message, token, screenshot, codigo} em cada item.
+    - callbacks ausente/vazio → fallback Django legado (processo/status/message/screenshot/codigo).
 
     screenshot_url: caminho relativo ('/screenshots/...') ou URL ja absoluta.
-    O campo 'screenshot' so e incluido no payload quando ha um print disponivel.
+    codigo: ID da assinatura de push (CREATE) que o tarefas-jrs guarda e usa no DELETE.
+    Os campos 'screenshot' e 'codigo' so entram no payload quando existem.
     """
     if not isinstance(data, dict):
         data = {}
@@ -104,6 +106,8 @@ def enviar_retornos(data, resultado, mensagem, screenshot_url=None):
                 }
                 if screenshot_abs:
                     payload["screenshot"] = screenshot_abs
+                if codigo is not None:
+                    payload["codigo"] = codigo
 
                 print(f"↪️  enviando retorno → {url} | payload: {payload}")
                 resp = requests.post(url, json=payload, timeout=_RETORNO_TIMEOUT)
@@ -129,6 +133,8 @@ def enviar_retornos(data, resultado, mensagem, screenshot_url=None):
         }
         if screenshot_abs:
             payload["screenshot"] = screenshot_abs
+        if codigo is not None:
+            payload["codigo"] = codigo
         try:
             response = requests.post(DJANGO_WEBHOOK_URL, json=payload, timeout=_RETORNO_TIMEOUT)
             if response.status_code == 200:
@@ -300,28 +306,47 @@ def start_automation(body):
             enviar_retornos(data, "ERRO", msg, shot)
             return {'data': data, 'status': 'ERRO', 'msg': msg, 'screenshot': shot}
 
-        if not garantir_perfil(driver, "Advogado"):
-            msg = ("Nao foi possivel trocar para o perfil 'Advogado'. "
-                   "O perito pode nao ter esse perfil neste TRT.")
-            print(f"- [STATUS]: {msg}")
-            shot = _shot('ERRO')
-            enviar_retornos(data, "ERRO", msg, shot)
-            return {'data': data, 'status': 'ERRO', 'msg': msg, 'screenshot': shot}
+        mensagem = None
+        resolvido_por_api = False
 
-        print(f'- (ACAO): {action}')
+        # 🚀 DELETE rápido via API: quando o tarefas-jrs manda o 'codigo' (ID
+        # interno do registro), inativa direto pela API — sem trocar perfil,
+        # abrir a tela de Push nem paginar. Qualquer falha cai no fluxo de UI.
+        codigo = data.get("codigo")
+        if action == 'delete' and codigo:
+            print(f"- (DELETE API): tentando inativar codigo={codigo} ...")
+            res_api = inativar_push_por_codigo(driver, codigo)
+            if res_api.get("sucesso"):
+                mensagem = res_api
+                resolvido_por_api = True
+                print(f"- (DELETE API): OK → {res_api.get('mensagem')}")
+            else:
+                print(f"- (DELETE API): falhou → {res_api.get('mensagem')} | "
+                      f"seguindo para o fluxo de UI")
 
-        pagina = data.get("pagina") or ""
+        if not resolvido_por_api:
+            if not garantir_perfil(driver, "Advogado"):
+                msg = ("Nao foi possivel trocar para o perfil 'Advogado'. "
+                       "O perito pode nao ter esse perfil neste TRT.")
+                print(f"- [STATUS]: {msg}")
+                shot = _shot('ERRO')
+                enviar_retornos(data, "ERRO", msg, shot)
+                return {'data': data, 'status': 'ERRO', 'msg': msg, 'screenshot': shot}
 
-        if action == 'create':
-            mensagem = automation.function_main_cad_push(processo, None)
-        elif action == 'delete':
-            mensagem = automation.function_main_del_push(pagina, processo, None)
-        else:
-            msg = f'Acao invalida: {action}'
-            print(f"- [STATUS]: {msg}")
-            shot = _shot('ERRO')
-            enviar_retornos(data, "ERRO", msg, shot)
-            return {'data': data, 'status': 'ERRO', 'msg': msg, 'screenshot': shot}
+            print(f'- (ACAO): {action}')
+
+            pagina = data.get("pagina") or ""
+
+            if action == 'create':
+                mensagem = automation.function_main_cad_push(processo, None)
+            elif action == 'delete':
+                mensagem = automation.function_main_del_push(pagina, processo)
+            else:
+                msg = f'Acao invalida: {action}'
+                print(f"- [STATUS]: {msg}")
+                shot = _shot('ERRO')
+                enviar_retornos(data, "ERRO", msg, shot)
+                return {'data': data, 'status': 'ERRO', 'msg': msg, 'screenshot': shot}
 
         resultado, mensagem_normalizada = normalizar_resultado(mensagem)
         print(f'- (STATUS): {resultado} | {mensagem_normalizada}')
@@ -345,6 +370,18 @@ def start_automation(body):
             mensagem_normalizada = mensagem
 
 
+        # Código da assinatura de push (o tarefas-jrs guarda por grau e usa no
+        # DELETE). Só faz sentido no CREATE que resultou em processo cadastrado
+        # (SUCESSO) ou já cadastrado (AVISO). O POST de cadastro nao devolve o
+        # codigo, entao consultamos via API na mesma sessao/grau.
+        codigo_push = None
+        if action == 'create' and resultado in ('SUCESSO', 'AVISO'):
+            try:
+                codigo_push = consultar_codigo_push(driver, processo)
+                print(f"- (CODIGO PUSH): {codigo_push}")
+            except Exception as e:
+                print(f"⚠️ Falha ao consultar codigo push: {e}")
+
         # Print da tela vinculado ao processo. No cadastro, prefere o print
         # capturado no momento da confirmacao (dentro de function_main_cad_push,
         # enquanto o feedback ainda estava visivel); senao, captura agora.
@@ -357,13 +394,14 @@ def start_automation(body):
             mensagem=mensagem_normalizada,
         )
 
-        enviar_retornos(data, resultado, mensagem_normalizada, screenshot)
+        enviar_retornos(data, resultado, mensagem_normalizada, screenshot, codigo_push)
 
         return {
             'data': data,
             'status': f'{resultado}',
             'msg': f"{mensagem_normalizada}",
             'screenshot': screenshot,
+            'codigo': codigo_push,
         }
 
     except Exception as e:
