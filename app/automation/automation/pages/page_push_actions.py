@@ -840,19 +840,67 @@ class AutomacaoPush:
 
     # -----------------------------------------------------
 
+    def _aguardar_overlay_sumir(self, timeout=6):
+        """
+        Espera qualquer backdrop de overlay do Angular Material (cdk) desaparecer.
+        Nao levanta excecao se ainda houver — apenas retorna False.
+        """
+        try:
+            WebDriverWait(self.driver, timeout).until(
+                EC.invisibility_of_element_located(
+                    (By.CSS_SELECTOR, "div.cdk-overlay-backdrop-showing")
+                )
+            )
+            return True
+        except TimeoutException:
+            return False
+
     def safe_click(self, locator, timeout=15):
+        """
+        Clica de forma resiliente. Se um overlay/backdrop (cdk-overlay) interceptar
+        o clique, aguarda ele sumir, refaz a busca do elemento e tenta de novo;
+        em ultimo caso, clica via JS. O caminho feliz permanece o mesmo.
+        """
         wait = WebDriverWait(self.driver, timeout)
 
         try:
             element = wait.until(EC.element_to_be_clickable(locator))
-            self.driver.execute_script(
-                "arguments[0].scrollIntoView({block:'center'});", element
-            )
-            element.click()
-            return True
-
         except TimeoutException:
             print(f"[SAFE_CLICK] Elemento não encontrado: {locator}")
+            return False
+
+        for tentativa in range(1, 3):
+            try:
+                self.driver.execute_script(
+                    "arguments[0].scrollIntoView({block:'center'});", element
+                )
+                element.click()
+                return True
+
+            except ElementClickInterceptedException:
+                print(
+                    f"[SAFE_CLICK] Clique interceptado por overlay "
+                    f"(tentativa {tentativa}). Aguardando backdrop sumir..."
+                )
+                self._aguardar_overlay_sumir(timeout=6)
+                try:
+                    element = wait.until(EC.element_to_be_clickable(locator))
+                except TimeoutException:
+                    break
+
+            except StaleElementReferenceException:
+                try:
+                    element = wait.until(EC.element_to_be_clickable(locator))
+                except TimeoutException:
+                    return False
+
+        # Último recurso: clique via JS (ignora sobreposição visual do overlay).
+        try:
+            self.driver.execute_script("arguments[0].click();", element)
+            print("[SAFE_CLICK] Clique via JS (fallback).")
+            return True
+        except Exception as e:
+            print(f"[SAFE_CLICK] Falha no clique após fallback JS: {e}")
             return False
 
     # -----------------------------------------------------

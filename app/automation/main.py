@@ -26,6 +26,13 @@ DJANGO_WEBHOOK_URL = f"{API_BASE_URL}/atividades/push/automation/update/status/"
 # Porta em que a API Flask (que serve os screenshots) escuta.
 PUSH_PUBLIC_PORT = os.getenv("PUSH_PUBLIC_PORT", "5000")
 
+# Timeout (segundos) do POST de retorno aos sistemas externos.
+# Tupla (connect, read): conecta rapido, mas da folga para a resposta do destino
+# (evita 'Read timed out' quando a app de origem demora a responder). Configuravel.
+RETORNO_CONNECT_TIMEOUT = float(os.getenv("RETORNO_CONNECT_TIMEOUT", "5"))
+RETORNO_READ_TIMEOUT = float(os.getenv("RETORNO_READ_TIMEOUT", "30"))
+_RETORNO_TIMEOUT = (RETORNO_CONNECT_TIMEOUT, RETORNO_READ_TIMEOUT)
+
 
 def _detectar_ip_local():
     """
@@ -96,7 +103,7 @@ def enviar_retornos(data, resultado, mensagem, screenshot_url=None):
                 }
                 if screenshot_abs:
                     payload["screenshot"] = screenshot_abs
-                requests.post(cb["url"], json=payload, timeout=10)
+                requests.post(cb["url"], json=payload, timeout=_RETORNO_TIMEOUT)
                 print(f"↩️  retorno OK → {cb['url']} ({resultado})")
             except Exception as e:
                 print(f"❌ retorno falhou → {cb.get('url')}: {e}")
@@ -111,7 +118,7 @@ def enviar_retornos(data, resultado, mensagem, screenshot_url=None):
         if screenshot_abs:
             payload["screenshot"] = screenshot_abs
         try:
-            response = requests.post(DJANGO_WEBHOOK_URL, json=payload, timeout=10)
+            response = requests.post(DJANGO_WEBHOOK_URL, json=payload, timeout=_RETORNO_TIMEOUT)
             if response.status_code == 200:
                 print(f"✅ Webhook Django enviado: {data.get('numero_processo')} -> {resultado}")
             else:
