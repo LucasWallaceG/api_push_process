@@ -94,19 +94,31 @@ def enviar_retornos(data, resultado, mensagem, screenshot_url=None):
 
     if callbacks:
         for cb in callbacks:
+            url = cb.get("url")
             try:
                 payload = {
-                    "id": cb["id"],
+                    "id": cb.get("id"),
                     "status": resultado,
                     "message": mensagem,
-                    "token": cb["token"],
+                    "token": cb.get("token"),
                 }
                 if screenshot_abs:
                     payload["screenshot"] = screenshot_abs
-                requests.post(cb["url"], json=payload, timeout=_RETORNO_TIMEOUT)
-                print(f"↩️  retorno OK → {cb['url']} ({resultado})")
+
+                print(f"↪️  enviando retorno → {url} | payload: {payload}")
+                resp = requests.post(url, json=payload, timeout=_RETORNO_TIMEOUT)
+
+                if 200 <= resp.status_code < 300:
+                    print(f"↩️  retorno OK → {url} [HTTP {resp.status_code}] ({resultado})")
+                else:
+                    # Chegou no destino, mas ele REJEITOU (nao foi 2xx).
+                    print(
+                        f"⚠️ retorno REJEITADO → {url} [HTTP {resp.status_code}] "
+                        f"| corpo: {resp.text[:500]}"
+                    )
             except Exception as e:
-                print(f"❌ retorno falhou → {cb.get('url')}: {e}")
+                # Nem chegou (DNS/conexao/timeout). Ex.: 'Read timed out', 'Connection refused'.
+                print(f"❌ retorno NAO ENTREGUE → {url}: {type(e).__name__}: {e}")
     else:
         # Contrato Django legado (retrocompatível)
         status_map = {"SUCESSO": "SUCCESS", "AVISO": "SUCCESS", "ERRO": "ERROR"}
