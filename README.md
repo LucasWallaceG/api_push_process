@@ -111,6 +111,34 @@ curl -X POST http://localhost:5000/push/received \
            "acao": "create"
          }'
 ```
+📸 Screenshots da Automação
+
+A cada processamento (cadastro ou exclusão de push), a automação captura um
+**print da tela** — tanto em **sucesso/aviso** quanto em **erro** — vinculado ao
+número do processo. Os prints:
+
+- São salvos em `screenshots/` (criada automaticamente; ignorada pelo Git).
+- Ficam disponíveis por URL na rota `GET /screenshots/<arquivo>.png`.
+- Aparecem na coluna **"Print"** do dashboard (link "🔍 Ver").
+- Têm a **URL absoluta incluída no webhook de retorno** (campo `screenshot`),
+  para que sistemas externos (ex.: `tarefas-jrs`) exibam o print na timeline da
+  tarefa. Ver [`docs/INTEGRACAO_SCREENSHOT_TAREFAS_JRS.md`](docs/INTEGRACAO_SCREENSHOT_TAREFAS_JRS.md).
+
+⚙️ Variáveis de Ambiente (`.env`)
+
+Além das configurações do RabbitMQ, o serviço usa:
+
+| Variável | Obrigatória | Padrão | Descrição |
+|---|---|---|---|
+| `PUSH_PUBLIC_URL` | Não | *(auto)* | URL base pública deste serviço, usada para montar a **URL absoluta** dos screenshots no webhook de retorno. **Se não definida, o IP da máquina é detectado automaticamente em runtime** — roda em qualquer IP sem configurar nada. Defina apenas para forçar um host/domínio específico (ex.: atrás de reverse-proxy ou acesso externo por domínio): `PUSH_PUBLIC_URL=http://meu-dominio:5000`. |
+| `PUSH_PUBLIC_PORT` | Não | `5000` | Porta usada na detecção automática do IP (ignorada se `PUSH_PUBLIC_URL` estiver definida). Ajuste se a API Flask rodar em outra porta. |
+
+> **Atenção (rede):** a URL do screenshot aponta para este serviço (porta 5000).
+> Como é o **navegador do usuário** que abre a imagem na timeline do `tarefas-jrs`,
+> esse host:porta precisa estar acessível a partir da máquina do usuário. Para
+> acesso externo, exponha o serviço por um domínio/reverse-proxy e defina
+> `PUSH_PUBLIC_URL`, ou faça o `tarefas-jrs` re-hospedar o print (ver doc de integração).
+
 📝 Padrões de Projeto Aplicados
 Page Object Model (POM): Organização da automação web por páginas.
 

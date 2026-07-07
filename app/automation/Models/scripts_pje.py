@@ -6,6 +6,7 @@ from datetime import datetime
 from selenium import webdriver
 from pywinauto.mouse import click
 from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
 from pywinauto import Desktop, timings, keyboard
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
@@ -848,74 +849,80 @@ def clicar_meu_painel(driver):
         return None
 
 
-def garantir_perfil(driver, perfil_desejado, timeout=12):
+def _perfil_atual(driver):
+    """Lê o perfil ativo (último span .papel-usuario do cabeçalho)."""
+    spans = driver.find_elements(By.XPATH, "//span[contains(@class,'papel-usuario')]")
+    return spans[-1].text.strip() if spans else ""
+
+
+def garantir_perfil(driver, perfil_desejado, timeout=25, tentativas=3):
     """
-    Garante que o perfil ativo seja o perfil_desejado.
-    Compatível com TRT5 (exceção Angular Material).
+    Garante que o perfil ativo no PJe KZ seja `perfil_desejado` (ex.: 'Advogado').
+
+    O item do menu é um button.mat-menu-item cujo aria-label termina em
+    " - Advogado", ex.:
+        aria-label="ANA PAULA ... (000.000.000-00) - Advogado"
+    e cujo texto visível é exatamente "Advogado". Casamos por aria-label
+    (estável) OU texto exato, e usamos a presença desse botão clicável como a
+    própria espera do carregamento assíncrono do overlay.
+
+    Correção: a versão anterior exigia normalize-space()='Advogado', que nunca
+    casava porque o item traz o nome completo do usuário antes do perfil.
     """
+    wait = WebDriverWait(driver, timeout)
+    alvo_lower = perfil_desejado.lower()
 
-    try:
-        # 🔎 Captura TODOS os spans de perfil
-        spans = WebDriverWait(driver, timeout).until(
-            EC.presence_of_all_elements_located(
-                (By.XPATH, "//span[contains(@class,'papel-usuario')]")
-            )
-        )
-
-        # 👉 O perfil real é SEMPRE o último
-        perfil_atual = spans[-1].text.strip()
-
-        print(f"[PERFIL] Atual: {perfil_atual} | Desejado: {perfil_desejado}")
-
-        if perfil_atual.lower() == perfil_desejado.lower():
-            print("[PERFIL] Perfil correto")
-            return True
-
-        # 🖱️ Abre menu de perfil
-        btn_perfil = WebDriverWait(driver, timeout).until(
-            EC.element_to_be_clickable(
-                (By.XPATH, "//button[contains(@class,'perfil-button')]")
-            )
-        )
-        btn_perfil.click()
-
-        # ⏳ Aguarda overlay do Angular aparecer
-        WebDriverWait(driver, timeout).until(
-            EC.presence_of_element_located(
-                (By.XPATH, "//div[contains(@class,'cdk-overlay-pane')]")
-            )
-        )
-
-        # 🖱️ Localiza o botão do perfil desejado
-        btn_destino = WebDriverWait(driver, timeout).until(
-            EC.presence_of_element_located(
-                (
-                    By.XPATH,
-                    f"//button[contains(@class,'mat-menu-item') and normalize-space()='{perfil_desejado}']"
-                )
-            )
-        )
-
-        # ⚠️ TRT5: clique normal costuma falhar → JS resolve
-        driver.execute_script("arguments[0].click();", btn_destino)
-
-        print(f"[PERFIL] Alternando para: {perfil_desejado}")
-
-        # ⏳ Aguarda mudança REAL (URL ou DOM)
-        WebDriverWait(driver, timeout).until(
-            lambda d:
-                perfil_desejado.lower() in d.page_source.lower()
-                or perfil_desejado.lower() in d.current_url.lower()
-        )
-
-        time.sleep(1.5)  # Angular settle
-
-        print("[PERFIL] Perfil alterado com sucesso")
+    atual = _perfil_atual(driver)
+    print(f"[PERFIL] Atual: {atual!r} | Desejado: {perfil_desejado!r}")
+    if alvo_lower in atual.lower():
+        print("[PERFIL] Já está no perfil correto.")
         return True
 
-    except Exception as e:
-        print(f"[PERFIL][ERRO] Falha ao garantir perfil '{perfil_desejado}': {e}")
-        return False
+    # Botão que abre o menu de perfis
+    xpath_btn_menu = (
+        "//button[contains(@class,'perfil-button') or "
+        "@aria-label='Trocar Órgão Julgador ou Perfil']"
+    )
+    # Item do perfil desejado (aria-label contém '- Advogado' OU texto exato)
+    xpath_item = (
+        f"//button[contains(@class,'mat-menu-item') and ("
+        f"contains(@aria-label, '- {perfil_desejado}') or "
+        f"normalize-space(.)='{perfil_desejado}')]"
+    )
+
+    for tentativa in range(1, tentativas + 1):
+        try:
+            print(f"[PERFIL] Abrindo menu (tentativa {tentativa}/{tentativas})...")
+            wait.until(EC.element_to_be_clickable((By.XPATH, xpath_btn_menu))).click()
+
+            # Espera o ITEM real aparecer e ficar clicável (cobre o carregamento
+            # assíncrono do overlay sem depender de qual cdk-overlay-pane é).
+            alvo = wait.until(EC.element_to_be_clickable((By.XPATH, xpath_item)))
+
+            driver.execute_script("arguments[0].scrollIntoView({block:'center'});", alvo)
+            try:
+                alvo.click()
+            except Exception:
+                # TRT5 / Angular Material: clique normal às vezes falha → JS resolve
+                driver.execute_script("arguments[0].click();", alvo)
+            print(f"[PERFIL] Item '{perfil_desejado}' clicado.")
+
+            # Confirma a troca lendo o cabeçalho (fonte da verdade)
+            wait.until(lambda d: alvo_lower in _perfil_atual(d).lower())
+            time.sleep(1.5)  # Angular settle
+            print("[PERFIL] Perfil alterado com sucesso.")
+            return True
+
+        except Exception as e:
+            print(f"[PERFIL][ERRO] Tentativa {tentativa} falhou: {e}")
+            try:  # fecha overlay (ESC) e tenta de novo
+                driver.switch_to.active_element.send_keys(Keys.ESCAPE)
+                time.sleep(0.5)
+            except Exception:
+                pass
+
+    print(f"[PERFIL][ERRO] Não foi possível trocar para '{perfil_desejado}'.")
+    return False
 
 
 def garantir_perfil_v0(driver, perfil_desejado, timeout=10):

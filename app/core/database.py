@@ -32,6 +32,7 @@ def init_db():
             acao        TEXT,
             status      TEXT,
             msg         TEXT,
+            screenshot  TEXT,
             data_hora   TEXT
         )
     """)
@@ -43,6 +44,12 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_registros_processo_acao
         ON registros (processo, acao)
     """)
+
+    # Migracao: adiciona a coluna 'screenshot' em bancos antigos que nao a possuem.
+    colunas = {row["name"] for row in conn.execute("PRAGMA table_info(registros)")}
+    if "screenshot" not in colunas:
+        conn.execute("ALTER TABLE registros ADD COLUMN screenshot TEXT")
+
     conn.commit()
 
 
@@ -56,24 +63,30 @@ def salvar_registro(registro: dict):
     row = cursor.fetchone()
 
     if row:
+        # Preserva o screenshot existente quando o novo registro nao traz um
+        # (ex.: atualizacao de status intermediaria sem novo print).
+        set_cols = ["status = ?", "msg = ?", "data_hora = ?", "trt = ?", "grau = ?", "ordem = ?"]
+        params = [
+            registro["status"],
+            registro["msg"],
+            registro["data_hora"],
+            registro["trt"],
+            registro["grau"],
+            registro["ordem"],
+        ]
+        if registro.get("screenshot"):
+            set_cols.append("screenshot = ?")
+            params.append(registro["screenshot"])
+        params.append(row["id"])
+
         conn.execute(
-            """UPDATE registros
-               SET status = ?, msg = ?, data_hora = ?, trt = ?, grau = ?, ordem = ?
-               WHERE id = ?""",
-            (
-                registro["status"],
-                registro["msg"],
-                registro["data_hora"],
-                registro["trt"],
-                registro["grau"],
-                registro["ordem"],
-                row["id"],
-            ),
+            f"UPDATE registros SET {', '.join(set_cols)} WHERE id = ?",
+            params,
         )
     else:
         conn.execute(
-            """INSERT INTO registros (ordem, processo, trt, grau, acao, status, msg, data_hora)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            """INSERT INTO registros (ordem, processo, trt, grau, acao, status, msg, screenshot, data_hora)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 registro["ordem"],
                 registro["processo"],
@@ -82,6 +95,7 @@ def salvar_registro(registro: dict):
                 registro["acao"],
                 registro["status"],
                 registro["msg"],
+                registro.get("screenshot"),
                 registro["data_hora"],
             ),
         )
