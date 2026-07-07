@@ -855,7 +855,7 @@ def _perfil_atual(driver):
     return spans[-1].text.strip() if spans else ""
 
 
-def garantir_perfil(driver, perfil_desejado, timeout=25, tentativas=3):
+def garantir_perfil(driver, perfil_desejado, timeout=25, tentativas=2):
     """
     Garante que o perfil ativo no PJe KZ seja `perfil_desejado` (ex.: 'Advogado').
 
