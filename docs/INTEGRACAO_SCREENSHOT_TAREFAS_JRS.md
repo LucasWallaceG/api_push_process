@@ -33,17 +33,21 @@ Quando a mensagem de entrada traz `callbacks`, o serviço faz um `POST` para cad
 
 ```json
 {
-  "id": 12345,
-  "status": "ERRO",
-  "token": "abc...",
-  "screenshot": "http://192.168.11.24:5000/screenshots/0000511-77.2025.5.06.0018_create_ERRO_20260707_181500.png"
+  "id": "ca53bfff-b8e5-4ab2-9776-3bbdead6113f",
+  "status": "SUCESSO",
+  "message": "o processo 0000387-04.2026.5.13.0006 já está cadastrado no push.",
+  "token": "6c5c7369c87a1a7d478b7679248b75f729db27e45eafb388",
+  "screenshot": "http://192.168.11.24:5000/screenshots/0000387-04.2026.5.13.0006_create_SUCESSO_20260707_181500.png"
 }
 ```
 
 - `id`      → identificador que o próprio `tarefas-jrs` enviou (ex.: id da tarefa/atividade).
 - `status`  → `SUCESSO` | `AVISO` | `ERRO`.
+- `message` → **NOVO**. A **mensagem real** devolvida pelo PJe após a ação (ex.:
+  "já está cadastrado no push.", "cadastrado com sucesso", detalhe do erro). É o
+  texto que deve ser exibido ao usuário na timeline. Pode vir em minúsculas.
 - `token`   → token de autenticação que o `tarefas-jrs` enviou (validar).
-- `screenshot` → **NOVO**. URL absoluta do print. **Pode não vir** (campo ausente) se a captura falhar.
+- `screenshot` → URL absoluta do print. **Pode não vir** (campo ausente) se a captura falhar.
 
 ### Contrato B — webhook Django legado (fallback)
 
@@ -68,23 +72,40 @@ Quando **não** há `callbacks`, o serviço faz `POST` para o endpoint legado
 ## 3. O que o `tarefas-jrs` precisa fazer
 
 ### 3.1 Persistência
-1. No endpoint que recebe o retorno da automação (o que hoje trata `id`/`status`
-   ou `processo`/`status`/`message`), **ler o campo opcional `screenshot`** do
-   corpo do request.
-2. Adicionar uma coluna/campo `screenshot_url` (`TEXT`/`CharField`, nullable) no
-   modelo do **evento da timeline** (ou da atividade de push, conforme o modelo
-   existente) e salvar o valor recebido. Se o campo vier ausente/nulo, gravar `null`.
+1. No endpoint que recebe o retorno da automação, **ler os campos** do corpo:
+   `status`, **`message`** (a mensagem real do PJe) e o opcional `screenshot`.
+2. Adicionar/usar campos no modelo do **evento da timeline** (ou da atividade de
+   push): um para a mensagem (ex.: `mensagem`/`descricao`, `TEXT`) e
+   `screenshot_url` (`TEXT`/`CharField`, nullable). Salvar os valores recebidos;
+   se `screenshot` vier ausente/nulo, gravar `null`.
 
-### 3.2 Exibição na timeline
-Ao renderizar o evento na timeline da tarefa, quando `screenshot_url` estiver
-preenchido, exibir um acesso ao print. Sugestões:
+### 3.2 Exibição na timeline (mensagem transparente)
+O objetivo é que o usuário **entenda exatamente o que aconteceu**, sem mensagens
+genéricas. Regras de apresentação:
 
-- **Link simples:** `🔍 Ver print da tela` abrindo em nova aba
-  (`<a href="{{ screenshot_url }}" target="_blank" rel="noopener">`).
-- **Miniatura clicável:** `<a href="{{ screenshot_url }}" target="_blank"><img src="{{ screenshot_url }}" style="max-height:80px;border-radius:6px" alt="print"></a>`.
+1. **Exibir a `message` literal do retorno** como texto principal do evento — é o
+   feedback real do PJe (ex.: *"o processo 0000387-04.2026.5.13.0006 já está
+   cadastrado no push."*). **Não** substituir por texto genérico do tipo
+   "Concluído" / "Erro".
+   - A mensagem pode vir em minúsculas; se quiser, aplique só um *capitalize* na
+     primeira letra para leitura, **sem** alterar o conteúdo.
+2. **Combinar com o `status`** para dar cor/ícone ao evento, mantendo a mensagem:
+   - `SUCESSO` → ✅ verde + a `message`.
+   - `AVISO`   → ⚠️ amarelo + a `message` (ex.: já cadastrado).
+   - `ERRO`    → ❌ vermelho + a `message` (detalhe do que falhou).
+3. **Anexar o print** quando `screenshot_url` existir — tanto em erro (entender o
+   que apareceu na tela) quanto em sucesso (comprovação visual):
+   - **Link simples:** `🔍 Ver print da tela` em nova aba
+     (`<a href="{{ screenshot_url }}" target="_blank" rel="noopener">`).
+   - **Miniatura clicável:** `<a href="{{ screenshot_url }}" target="_blank"><img src="{{ screenshot_url }}" style="max-height:80px;border-radius:6px" alt="print"></a>`.
 
-Exibir tanto em eventos de **erro** (para o usuário entender o que aconteceu na
-tela) quanto de **sucesso** (comprovação visual).
+**Exemplo de card na timeline:**
+
+```
+✅  Cadastro no Push — 07/07/2026 18:15
+    o processo 0000387-04.2026.5.13.0006 já está cadastrado no push.
+    🔍 Ver print da tela
+```
 
 ### 3.3 Rede / acesso (atenção)
 - A URL aponta para o **serviço de push na porta 5000**. Por padrão o host dessa
@@ -106,10 +127,11 @@ tela) quanto de **sucesso** (comprovação visual).
 
 ## 4. Checklist de implementação no `tarefas-jrs`
 
-- [ ] Ler `screenshot` (opcional) no handler do webhook de retorno da automação.
-- [ ] Adicionar campo `screenshot_url` (nullable) no modelo do evento/atividade + migração.
-- [ ] Salvar o valor no evento correspondente (casar pelo `id`/`processo`).
-- [ ] Renderizar link/miniatura na timeline quando `screenshot_url` existir.
+- [ ] Ler `message` (mensagem real) e `screenshot` (opcional) no handler do webhook.
+- [ ] Persistir a `message` no evento da timeline (campo de texto) + `screenshot_url` (nullable) + migração.
+- [ ] Salvar os valores no evento correspondente (casar pelo `id`/`processo`).
+- [ ] Renderizar a `message` literal como texto do evento (não usar texto genérico), com cor/ícone pelo `status`.
+- [ ] Renderizar link/miniatura do print quando `screenshot_url` existir.
 - [ ] Validar acesso de rede do navegador do usuário à URL (ou adotar re-hospedagem — seção 3.3).
 
 ## 5. Exemplo de handler (pseudo-Django, contrato A)
@@ -120,16 +142,18 @@ def receber_status_push(request):
     body = json.loads(request.body)
 
     atividade_id = body.get("id")
-    status       = body.get("status")          # SUCESSO | AVISO | ERRO
+    status       = body.get("status")           # SUCESSO | AVISO | ERRO
+    message      = body.get("message", "")       # <-- NOVO: mensagem real do PJe
     token        = body.get("token")
-    screenshot   = body.get("screenshot")       # <-- NOVO (opcional, pode ser None)
+    screenshot   = body.get("screenshot")        # opcional, pode ser None
 
     validar_token(token)
 
     evento = criar_evento_timeline(
         atividade_id=atividade_id,
         status=status,
-        screenshot_url=screenshot,   # salvar; renderizar depois se != None
+        mensagem=message,            # exibir literal na timeline (não trocar por texto genérico)
+        screenshot_url=screenshot,   # salvar; renderizar link/miniatura se != None
     )
     return JsonResponse({"ok": True})
 ```

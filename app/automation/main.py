@@ -73,7 +73,7 @@ def _url_absoluta_screenshot(screenshot):
 def enviar_retornos(data, resultado, mensagem, screenshot_url=None):
     """
     Posta o resultado em cada destino da lista callbacks da mensagem.
-    - callbacks presente → POST {id, status, token, screenshot} em cada item.
+    - callbacks presente → POST {id, status, message, token, screenshot} em cada item.
     - callbacks ausente/vazio → fallback Django legado (processo/status/message/screenshot).
 
     screenshot_url: caminho relativo ('/screenshots/...') ou URL ja absoluta.
@@ -88,7 +88,12 @@ def enviar_retornos(data, resultado, mensagem, screenshot_url=None):
     if callbacks:
         for cb in callbacks:
             try:
-                payload = {"id": cb["id"], "status": resultado, "token": cb["token"]}
+                payload = {
+                    "id": cb["id"],
+                    "status": resultado,
+                    "message": mensagem,
+                    "token": cb["token"],
+                }
                 if screenshot_abs:
                     payload["screenshot"] = screenshot_abs
                 requests.post(cb["url"], json=payload, timeout=10)
