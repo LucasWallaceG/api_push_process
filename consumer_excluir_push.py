@@ -27,7 +27,7 @@ _lock = threading.Lock()
 _ordem_counter = 0
 
 
-def _registrar(processo, trt, grau, acao, status, msg=""):
+def _registrar(processo, trt, grau, acao, status, msg="", screenshot=None):
     global _ordem_counter
     with _lock:
         _ordem_counter += 1
@@ -39,6 +39,7 @@ def _registrar(processo, trt, grau, acao, status, msg=""):
             "acao": acao,
             "status": status,
             "msg": msg,
+            "screenshot": screenshot,
             "data_hora": datetime.now().isoformat(),
         }
     salvar_registro(registro)
@@ -63,8 +64,9 @@ def callback(ch, method, _properties, body):
 
         status = resultado.get("status", "ERRO").upper() if isinstance(resultado, dict) else "ERRO"
         msg = resultado.get("msg", "") if isinstance(resultado, dict) else str(resultado)
+        screenshot = resultado.get("screenshot") if isinstance(resultado, dict) else None
 
-        _registrar(processo, trt, grau, acao, status, msg)
+        _registrar(processo, trt, grau, acao, status, msg, screenshot)
 
         print(f"- [STATUS]: {status} | {msg}")
 

@@ -1,0 +1,53 @@
+{
+    // Configurações de depuração do projeto api_push_process
+    "version": "0.2.0",
+    "configurations": [
+        {
+            // RECOMENDADO: chama start_automation direto -> cai em function_main_cad_push
+            "name": "Debug: Cadastro Push (direto)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/debug_cad_push.py",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "python": "${workspaceFolder}/env/Scripts/python.exe",
+            "envFile": "${workspaceFolder}/.env",
+            "justMyCode": true
+        },
+        {
+            // Caminho que chega em function_main_cad_push (acao == "create")
+            "name": "Debug: Worker Cadastro (consumer)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/consumer_cadastrar_push.py",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "python": "${workspaceFolder}/env/Scripts/python.exe",
+            "envFile": "${workspaceFolder}/.env",
+            "justMyCode": true
+        },
+        {
+            // API Flask (porta 5000) — usada para publicar mensagens na fila
+            "name": "Debug: API Flask",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/main.py",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "python": "${workspaceFolder}/env/Scripts/python.exe",
+            "envFile": "${workspaceFolder}/.env",
+            "justMyCode": true
+        },
+        {
+            // Anexa o depurador a um processo Python já em execução (ex.: worker rodando no terminal)
+            "name": "Debug: Attach (processo em execução)",
+            "type": "debugpy",
+            "request": "attach",
+            "connect": {
+                "host": "localhost",
+                "port": 5678
+            },
+            "justMyCode": true
+        }
+    ]
+}

@@ -2,9 +2,10 @@ import os
 import json
 import threading
 from datetime import datetime
-from flask import Flask, jsonify, request, render_template
+from flask import Flask, jsonify, request, render_template, send_from_directory, abort
 from app.core.rabbitmq import Rabbitmq
 from app.core.database import init_db, salvar_registro, buscar_registros
+from app.core.screenshots import SCREENSHOT_DIR
 from app.automation import main
 
 app = Flask(__name__)
@@ -18,7 +19,7 @@ _lock = threading.Lock()
 _ordem_counter = 0
 
 
-def registrar(processo, trt, grau, acao, status, msg=""):
+def registrar(processo, trt, grau, acao, status, msg="", screenshot=None):
     global _ordem_counter
     with _lock:
         _ordem_counter += 1
@@ -28,6 +29,8 @@ def registrar(processo, trt, grau, acao, status, msg=""):
             if r["processo"] == processo and r["acao"] == acao:
                 r["status"] = status
                 r["msg"] = msg
+                if screenshot:
+                    r["screenshot"] = screenshot
                 r["data_hora"] = datetime.now().isoformat()
                 salvar_registro(r)
                 return r
@@ -40,6 +43,7 @@ def registrar(processo, trt, grau, acao, status, msg=""):
             "acao": acao,
             "status": status,
             "msg": msg,
+            "screenshot": screenshot,
             "data_hora": datetime.now().isoformat(),
         }
         registros.insert(0, registro)
@@ -77,11 +81,13 @@ def callback_start_automacao(ch, method, _properties, body):
         if isinstance(msg_return, dict):
             status_final = msg_return.get("status", "ERRO").upper()
             msg_final = msg_return.get("msg", "")
+            screenshot_final = msg_return.get("screenshot")
         else:
             status_final = "ERRO"
             msg_final = str(msg_return)
+            screenshot_final = None
 
-        registrar(processo, trt, grau, acao, status_final, msg_final)
+        registrar(processo, trt, grau, acao, status_final, msg_final, screenshot_final)
 
     except Exception as e:
         print(f'- (Erro critico no callback): {e}')
@@ -103,6 +109,15 @@ def start_consumer():
 @app.route('/')
 def dashboard():
     return render_template('dashboard.html')
+
+
+@app.route('/screenshots/<path:filename>')
+def servir_screenshot(filename):
+    # send_from_directory ja protege contra path traversal (../).
+    try:
+        return send_from_directory(SCREENSHOT_DIR, filename)
+    except Exception:
+        abort(404)
 
 
 @app.route('/api/dashboard')

@@ -186,6 +186,15 @@
         .col-ordem { width: 60px; text-align: center; color: #90A4AE; font-weight: 500; }
         .col-processo { font-family: 'Consolas', 'Courier New', monospace; font-weight: 500; font-size: 0.84rem; }
         .col-msg { max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .col-print { white-space: nowrap; text-align: center; }
+        .print-link {
+            color: #1976D2;
+            text-decoration: none;
+            font-size: 0.82rem;
+            font-weight: 500;
+            white-space: nowrap;
+        }
+        .print-link:hover { text-decoration: underline; }
         .col-data { white-space: nowrap; font-size: 0.82rem; color: #78909C; }
 
         /* --- BADGES --- */
@@ -344,12 +353,13 @@
                         <th>Acao</th>
                         <th>Status</th>
                         <th>Mensagem</th>
+                        <th>Print</th>
                         <th>Data/Hora</th>
                     </tr>
                 </thead>
                 <tbody id="table-body">
                     <tr>
-                        <td colspan="8">
+                        <td colspan="9">
                             <div class="empty-state">
                                 <svg width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24">
                                     <path d="M9 12h6m-3-3v6m-7 4h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
@@ -489,7 +499,7 @@
 
             if (total === 0) {
                 tbody.innerHTML = `
-                    <tr><td colspan="8">
+                    <tr><td colspan="9">
                         <div class="empty-state">
                             <p>Nenhum processo encontrado</p>
                         </div>
@@ -510,6 +520,9 @@
                     <td>${r.acao || '-'}</td>
                     <td><span class="badge ${badgeClass(r.status)}">${r.status || '-'}</span></td>
                     <td class="col-msg" title="${(r.msg || '').replace(/"/g, '&quot;')}">${r.msg || '-'}</td>
+                    <td class="col-print">${r.screenshot
+                        ? `<a class="print-link" href="${r.screenshot}" target="_blank" rel="noopener" title="Abrir print da tela">🔍 Ver</a>`
+                        : '-'}</td>
                     <td class="col-data">${formatDate(r.data_hora)}</td>
                 </tr>
             `).join('');

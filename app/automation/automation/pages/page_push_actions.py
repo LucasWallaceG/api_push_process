@@ -11,6 +11,7 @@ from selenium.common.exceptions import (
     ElementClickInterceptedException,
     StaleElementReferenceException
 )
+from app.core.screenshots import capturar_screenshot
 
 def detectar_contexto_push(driver):
     """
@@ -758,6 +759,8 @@ class AutomacaoPush:
         self.trt_atual = None
         self.first_execution = True
         self.pagina_atual = pagina_atual
+        # Print da tela capturado no momento da confirmacao de sucesso do cadastro.
+        self.ultimo_screenshot = None
 
         self.BTN_MEU_PAINEL = (
             By.XPATH,
@@ -1432,6 +1435,17 @@ class AutomacaoPush:
         msg_return = self.capturar_feedback_ou_validar_total(
             total_anterior=total_antes
         )
+
+        # 📸 Captura o print AGORA, enquanto a mensagem de confirmacao/feedback
+        # ainda esta visivel na tela (ela pode desaparecer logo depois). Guardado
+        # em self.ultimo_screenshot para o start_automation usar no retorno.
+        try:
+            self.ultimo_screenshot = capturar_screenshot(
+                self.driver, numero_processo, "create", "SUCESSO"
+            )
+        except Exception as e:
+            print(f"⚠️ Falha ao capturar screenshot de sucesso: {e}")
+
         # msg = self.capturar_mensagem_feedback(5)
         # print(f'- (Msg): {msg}')
         # scraper.save_json("processos_push.json")
