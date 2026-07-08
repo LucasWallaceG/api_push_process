@@ -1,12 +1,17 @@
 import os
 import sys
 import json
+import uuid
 import threading
 import pika
 from datetime import datetime
 from dotenv import load_dotenv
 
 load_dotenv()
+
+# Perfil Firefox proprio deste servico (evita conflito com o consumer de exclusao,
+# que roda em paralelo, e persiste o "lembrar minha escolha" do certificado).
+os.environ["FIREFOX_PROFILE"] = "cadastro"
 
 sys.path.insert(0, os.path.dirname(__file__))
 from app.automation import main as automacao
@@ -27,7 +32,7 @@ _lock = threading.Lock()
 _ordem_counter = 0
 
 
-def _registrar(processo, trt, grau, acao, status, msg="", screenshot=None):
+def _registrar(processo, trt, grau, acao, status, msg="", screenshot=None, req_id=None):
     global _ordem_counter
     with _lock:
         _ordem_counter += 1
@@ -40,6 +45,7 @@ def _registrar(processo, trt, grau, acao, status, msg="", screenshot=None):
             "status": status,
             "msg": msg,
             "screenshot": screenshot,
+            "req_id": req_id,
             "data_hora": datetime.now().isoformat(),
         }
     salvar_registro(registro)
@@ -48,9 +54,13 @@ def _registrar(processo, trt, grau, acao, status, msg="", screenshot=None):
 def callback(ch, method, _properties, body):
     processo = None
     data = {}
+    # id unico desta requisicao: colapsa o ciclo de vida (PROCESSANDO -> final)
+    # numa linha so, e mantem cada requisicao como uma linha propria no dashboard.
+    req_id = str(uuid.uuid4())
 
     try:
         data = json.loads(body.decode()) if isinstance(body, (bytes, bytearray)) else json.loads(body)
+        req_id = data.get("req_id") or req_id
         processo = data.get("numero_processo")
         trt = data.get("tribunal")
         grau = data.get("grau")
@@ -58,7 +68,7 @@ def callback(ch, method, _properties, body):
 
         print(f"\n[CADASTRO] Processo recebido da fila: {processo}")
 
-        _registrar(processo, trt, grau, acao, "PROCESSANDO", "Automacao em andamento...")
+        _registrar(processo, trt, grau, acao, "PROCESSANDO", "Automacao em andamento...", req_id=req_id)
 
         resultado = automacao.start_automation(body)
 
@@ -66,7 +76,7 @@ def callback(ch, method, _properties, body):
         msg = resultado.get("msg", "") if isinstance(resultado, dict) else str(resultado)
         screenshot = resultado.get("screenshot") if isinstance(resultado, dict) else None
 
-        _registrar(processo, trt, grau, acao, status, msg, screenshot)
+        _registrar(processo, trt, grau, acao, status, msg, screenshot, req_id=req_id)
 
         print(f"- [STATUS]: {status} | {msg}")
 
@@ -77,7 +87,7 @@ def callback(ch, method, _properties, body):
         print(f"[ERRO CRITICO] {e}")
         if processo:
             automacao.enviar_retornos(data, "ERRO", str(e))
-            _registrar(processo, None, None, "create", "ERRO", str(e))
+            _registrar(processo, None, None, "create", "ERRO", str(e), req_id=req_id)
         ch.basic_ack(delivery_tag=method.delivery_tag)
 
 

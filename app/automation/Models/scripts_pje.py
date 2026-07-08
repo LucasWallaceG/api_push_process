@@ -162,10 +162,30 @@ def send_intimacoes_api(intimacoes, perito_id):
         return False
 
 
-def criar_driver():
+def criar_driver(perfil_nome=None):
     options = FirefoxOptions()
+
+    # 🔒 Perfil FIXO por servico — persiste as escolhas ("lembrar minha escolha")
+    # entre execucoes, evitando o pop-up de permissao do certificado a cada run.
+    # ⚠️ O Firefox NAO permite 2 processos no mesmo perfil simultaneamente, e este
+    # projeto roda 2 consumers em paralelo (cadastro/exclusao). Por isso cada
+    # servico usa um perfil proprio, definido pela env FIREFOX_PROFILE.
+    if not perfil_nome:
+        perfil_nome = os.getenv("FIREFOX_PROFILE", "default")
+    perfil_dir = os.path.abspath(os.path.join("firefox_profiles", perfil_nome))
+    os.makedirs(perfil_dir, exist_ok=True)
+    options.add_argument("-profile")
+    options.add_argument(perfil_dir)
+
+    # Dispensa o pop-up de permissao para abrir o app externo do
+    # certificado/assinador (ex.: "sso.cloud.pje.jus.br quer acessar...").
+    options.set_preference("security.external_protocol_requires_permission", False)
+    options.set_preference("network.protocol-handler.external-default", True)
+    options.set_preference("network.protocol-handler.warn-external-default", False)
+
     caminho_driver = os.path.abspath("./app/automation/drivers/geckodriver.exe")
     print(f'- (Path Geckodriver): {caminho_driver}')
+    print(f'- (Firefox profile): {perfil_dir}')
     service = FirefoxService(executable_path=caminho_driver)
     driver = webdriver.Firefox(service=service, options=options)
     driver.maximize_window()

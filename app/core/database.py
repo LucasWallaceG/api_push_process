@@ -33,6 +33,7 @@ def init_db():
             status      TEXT,
             msg         TEXT,
             screenshot  TEXT,
+            req_id      TEXT,
             data_hora   TEXT
         )
     """)
@@ -45,21 +46,47 @@ def init_db():
         ON registros (processo, acao)
     """)
 
-    # Migracao: adiciona a coluna 'screenshot' em bancos antigos que nao a possuem.
+    # Migracao: adiciona colunas novas em bancos antigos que nao as possuem.
     colunas = {row["name"] for row in conn.execute("PRAGMA table_info(registros)")}
     if "screenshot" not in colunas:
         conn.execute("ALTER TABLE registros ADD COLUMN screenshot TEXT")
+    if "req_id" not in colunas:
+        conn.execute("ALTER TABLE registros ADD COLUMN req_id TEXT")
+
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_registros_req_id
+        ON registros (req_id)
+    """)
 
     conn.commit()
 
 
 def salvar_registro(registro: dict):
-    """Insere ou atualiza registro no banco (upsert por processo+acao)."""
+    """
+    Insere ou atualiza registro no banco.
+
+    Deduplicacao:
+    - Se o registro traz 'req_id' (id unico da requisicao), o upsert e por req_id.
+      Assim o ciclo de vida da MESMA requisicao (AGUARDANDO -> PROCESSANDO -> final)
+      atualiza uma unica linha, e cada NOVA requisicao vira uma NOVA linha.
+    - Sem req_id (legado), colapsa apenas quando a ultima linha do mesmo
+      (processo, acao) ainda estiver em andamento; caso contrario, insere nova.
+    """
     conn = _get_conn()
-    cursor = conn.execute(
-        "SELECT id FROM registros WHERE processo = ? AND acao = ?",
-        (registro["processo"], registro["acao"]),
-    )
+    req_id = registro.get("req_id")
+
+    if req_id:
+        cursor = conn.execute(
+            "SELECT id FROM registros WHERE req_id = ?",
+            (req_id,),
+        )
+    else:
+        cursor = conn.execute(
+            "SELECT id FROM registros WHERE processo = ? AND acao = ? "
+            "AND status IN ('AGUARDANDO', 'PROCESSANDO') "
+            "ORDER BY id DESC LIMIT 1",
+            (registro["processo"], registro["acao"]),
+        )
     row = cursor.fetchone()
 
     if row:
@@ -85,8 +112,8 @@ def salvar_registro(registro: dict):
         )
     else:
         conn.execute(
-            """INSERT INTO registros (ordem, processo, trt, grau, acao, status, msg, screenshot, data_hora)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            """INSERT INTO registros (ordem, processo, trt, grau, acao, status, msg, screenshot, req_id, data_hora)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 registro["ordem"],
                 registro["processo"],
@@ -96,6 +123,7 @@ def salvar_registro(registro: dict):
                 registro["status"],
                 registro["msg"],
                 registro.get("screenshot"),
+                registro.get("req_id"),
                 registro["data_hora"],
             ),
         )

@@ -1,5 +1,6 @@
 import os
 import json
+import uuid
 import threading
 from datetime import datetime
 from flask import Flask, jsonify, request, render_template, send_from_directory, abort
@@ -19,14 +20,17 @@ _lock = threading.Lock()
 _ordem_counter = 0
 
 
-def registrar(processo, trt, grau, acao, status, msg="", screenshot=None):
+def registrar(processo, trt, grau, acao, status, msg="", screenshot=None, req_id=None):
     global _ordem_counter
     with _lock:
         _ordem_counter += 1
 
-        # Atualiza registro existente (mesmo processo + acao) ou cria novo
+        # Atualiza registro existente (por req_id, senao por processo+acao) ou cria novo
         for r in registros:
-            if r["processo"] == processo and r["acao"] == acao:
+            mesmo = (r.get("req_id") == req_id) if req_id else (
+                r["processo"] == processo and r["acao"] == acao
+            )
+            if mesmo:
                 r["status"] = status
                 r["msg"] = msg
                 if screenshot:
@@ -44,6 +48,7 @@ def registrar(processo, trt, grau, acao, status, msg="", screenshot=None):
             "status": status,
             "msg": msg,
             "screenshot": screenshot,
+            "req_id": req_id,
             "data_hora": datetime.now().isoformat(),
         }
         registros.insert(0, registro)
@@ -69,9 +74,10 @@ def callback_start_automacao(ch, method, _properties, body):
     trt = data.get("tribunal")
     grau = data.get("grau")
     acao = data.get("acao")
+    req_id = data.get("req_id") or str(uuid.uuid4())
 
     # Registrar como PROCESSANDO
-    registrar(processo, trt, grau, acao, "PROCESSANDO", "Automacao em andamento...")
+    registrar(processo, trt, grau, acao, "PROCESSANDO", "Automacao em andamento...", req_id=req_id)
 
     try:
         msg_return = main.start_automation(body)
@@ -87,11 +93,11 @@ def callback_start_automacao(ch, method, _properties, body):
             msg_final = str(msg_return)
             screenshot_final = None
 
-        registrar(processo, trt, grau, acao, status_final, msg_final, screenshot_final)
+        registrar(processo, trt, grau, acao, status_final, msg_final, screenshot_final, req_id=req_id)
 
     except Exception as e:
         print(f'- (Erro critico no callback): {e}')
-        registrar(processo, trt, grau, acao, "ERRO", "Erro interno na automacao")
+        registrar(processo, trt, grau, acao, "ERRO", "Erro interno na automacao", req_id=req_id)
     finally:
         ch.basic_ack(delivery_tag=method.delivery_tag)
         print('- (ACK): Mensagem confirmada na fila.')
@@ -153,6 +159,11 @@ def send_push_queue():
             "item": novo_push
         }), 400
 
+    # id unico da requisicao: vai na mensagem para o consumer reaproveitar,
+    # ligando AGUARDANDO -> PROCESSANDO -> final numa unica linha do dashboard.
+    req_id = novo_push.get("req_id") or str(uuid.uuid4())
+    novo_push["req_id"] = req_id
+
     routing_key = os.getenv('RECEIVED_EVENT_PUSH_KEY')
     exchange = os.getenv('EXCHANGE')
 
@@ -178,6 +189,7 @@ def send_push_queue():
             novo_push.get("acao"),
             "AGUARDANDO",
             "Na fila de processamento",
+            req_id=req_id,
         )
 
     except Exception as e:

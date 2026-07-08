@@ -6,5 +6,8 @@ others
 # Prints da automacao (gerados em runtime)
 screenshots/
 
+# Perfis do Firefox (dados do navegador, por servico) - nao versionar
+firefox_profiles/
+
 # Script auxiliar de depuracao local
 debug_cad_push.py
