@@ -131,6 +131,7 @@ Além das configurações do RabbitMQ, o serviço usa:
 | Variável | Obrigatória | Padrão | Descrição |
 |---|---|---|---|
 | `PORT` | Não | `8000` | Porta em que a API Flask (dashboard + endpoints) escuta. |
+| `API_BASE_URL` | Não | `http://192.168.11.24:6000` | Base do **webhook Django legado**, usado **apenas** quando a mensagem não traz `callbacks`. ⚠️ Não aponte para a porta do `PORT` — seria auto-referência a este próprio serviço. |
 | `PUSH_PUBLIC_URL` | Não | *(auto)* | URL base pública deste serviço, usada para montar a **URL absoluta** dos screenshots no webhook de retorno. **Se não definida, o IP da máquina é detectado automaticamente em runtime** — roda em qualquer IP sem configurar nada. Defina apenas para forçar um host/domínio específico (ex.: atrás de reverse-proxy ou acesso externo por domínio): `PUSH_PUBLIC_URL=http://meu-dominio:8000`. |
 | `PUSH_PUBLIC_PORT` | Não | valor de `PORT` | Porta usada na detecção automática do IP (ignorada se `PUSH_PUBLIC_URL` estiver definida). Só defina se a porta pública for diferente da porta em que o Flask escuta (ex.: atrás de proxy). |
 

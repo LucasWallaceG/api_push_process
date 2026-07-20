@@ -20,8 +20,10 @@ TRT_EXCECOES = {}
 TRT_COOLDOWN = {}  # { trt: datetime }
 TRT_COOLDOWN_MINUTES = 10
 
-# Webhook Django (fallback quando a mensagem não traz callbacks)
-API_BASE_URL = "http://192.168.11.24:8000"
+# Webhook Django (fallback quando a mensagem não traz callbacks).
+# Configuravel via .env. O default usa a porta 6000 — a 8000 passou a ser a da
+# propria API Flask deste servico, entao apontar para la criaria auto-referencia.
+API_BASE_URL = os.getenv("API_BASE_URL", "http://192.168.11.24:6000").rstrip("/")
 DJANGO_WEBHOOK_URL = f"{API_BASE_URL}/atividades/push/automation/update/status/"
 
 # Porta em que a API Flask (que serve os screenshots) escuta.
