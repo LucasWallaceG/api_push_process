@@ -15,7 +15,7 @@ Ao iniciar, o projeto abre **3 janelas** de console, uma para cada serviço:
 
 | Janela | Serviço | O que faz |
 |---|---|---|
-| 1 | **Dashboard Flask** | Painel web em `http://localhost:5000` |
+| 1 | **Dashboard Flask** | Painel web em `http://localhost:8000` |
 | 2 | **Consumer Cadastro** | Processa a fila de **cadastro** de push |
 | 3 | **Consumer Exclusão** | Processa a fila de **exclusão** de push |
 

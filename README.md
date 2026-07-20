@@ -79,7 +79,7 @@ Abre automaticamente três terminais separados:
 
 | Terminal | Serviço | Detalhe |
 |---|---|---|
-| 1 | Dashboard Flask | `http://localhost:5000` |
+| 1 | Dashboard Flask | `http://localhost:8000` |
 | 2 | Consumer Cadastro | fila `queue_push_insert` |
 | 3 | Consumer Exclusão | fila `queue_push_delete` |
 
@@ -103,7 +103,7 @@ python consumer_excluir_push.py
 
 **Simulando um envio de dados (Postman/cURL):**
 ```bash
-curl -X POST http://localhost:5000/push/received \
+curl -X POST http://localhost:8000/push/received \
      -H "Content-Type: application/json" \
      -d '{
            "numero_processo": "0000000-00.2000.5.06.0011",
@@ -130,10 +130,11 @@ Além das configurações do RabbitMQ, o serviço usa:
 
 | Variável | Obrigatória | Padrão | Descrição |
 |---|---|---|---|
-| `PUSH_PUBLIC_URL` | Não | *(auto)* | URL base pública deste serviço, usada para montar a **URL absoluta** dos screenshots no webhook de retorno. **Se não definida, o IP da máquina é detectado automaticamente em runtime** — roda em qualquer IP sem configurar nada. Defina apenas para forçar um host/domínio específico (ex.: atrás de reverse-proxy ou acesso externo por domínio): `PUSH_PUBLIC_URL=http://meu-dominio:5000`. |
-| `PUSH_PUBLIC_PORT` | Não | `5000` | Porta usada na detecção automática do IP (ignorada se `PUSH_PUBLIC_URL` estiver definida). Ajuste se a API Flask rodar em outra porta. |
+| `PORT` | Não | `8000` | Porta em que a API Flask (dashboard + endpoints) escuta. |
+| `PUSH_PUBLIC_URL` | Não | *(auto)* | URL base pública deste serviço, usada para montar a **URL absoluta** dos screenshots no webhook de retorno. **Se não definida, o IP da máquina é detectado automaticamente em runtime** — roda em qualquer IP sem configurar nada. Defina apenas para forçar um host/domínio específico (ex.: atrás de reverse-proxy ou acesso externo por domínio): `PUSH_PUBLIC_URL=http://meu-dominio:8000`. |
+| `PUSH_PUBLIC_PORT` | Não | valor de `PORT` | Porta usada na detecção automática do IP (ignorada se `PUSH_PUBLIC_URL` estiver definida). Só defina se a porta pública for diferente da porta em que o Flask escuta (ex.: atrás de proxy). |
 
-> **Atenção (rede):** a URL do screenshot aponta para este serviço (porta 5000).
+> **Atenção (rede):** a URL do screenshot aponta para este serviço (porta `8000` por padrão).
 > Como é o **navegador do usuário** que abre a imagem na timeline do `tarefas-jrs`,
 > esse host:porta precisa estar acessível a partir da máquina do usuário. Para
 > acesso externo, exponha o serviço por um domínio/reverse-proxy e defina

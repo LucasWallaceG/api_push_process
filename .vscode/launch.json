@@ -27,7 +27,7 @@
             "justMyCode": true
         },
         {
-            // API Flask (porta 5000) — usada para publicar mensagens na fila
+            // API Flask (porta 8000) — usada para publicar mensagens na fila
             "name": "Debug: API Flask",
             "type": "debugpy",
             "request": "launch",

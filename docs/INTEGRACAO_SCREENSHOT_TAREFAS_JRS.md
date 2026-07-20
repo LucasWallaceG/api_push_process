@@ -17,7 +17,7 @@ envia de volta.
 - O print é servido pela API Flask do serviço de push na rota
   `GET /screenshots/<arquivo>.png`.
 - A URL enviada no retorno é **absoluta** (ex.:
-  `http://192.168.11.24:5000/screenshots/0000511-77.2025.5.06.0018_create_ERRO_20260707_181500.png`),
+  `http://192.168.11.24:8000/screenshots/0000511-77.2025.5.06.0018_create_ERRO_20260707_181500.png`),
   ou seja, pode ser aberta diretamente no navegador / usada em `<img src>`.
 
 ## 2. Novo campo no payload de retorno: `screenshot`
@@ -37,7 +37,7 @@ Quando a mensagem de entrada traz `callbacks`, o serviço faz um `POST` para cad
   "status": "SUCESSO",
   "message": "o processo 0000387-04.2026.5.13.0006 já está cadastrado no push.",
   "token": "6c5c7369c87a1a7d478b7679248b75f729db27e45eafb388",
-  "screenshot": "http://192.168.11.24:5000/screenshots/0000387-04.2026.5.13.0006_create_SUCESSO_20260707_181500.png"
+  "screenshot": "http://192.168.11.24:8000/screenshots/0000387-04.2026.5.13.0006_create_SUCESSO_20260707_181500.png"
 }
 ```
 
@@ -59,7 +59,7 @@ Quando **não** há `callbacks`, o serviço faz `POST` para o endpoint legado
   "processo": "0000511-77.2025.5.06.0018",
   "status": "ERROR",
   "message": "Nao foi possivel trocar para o perfil 'Advogado'...",
-  "screenshot": "http://192.168.11.24:5000/screenshots/..._ERRO_....png"
+  "screenshot": "http://192.168.11.24:8000/screenshots/..._ERRO_....png"
 }
 ```
 
@@ -108,20 +108,20 @@ genéricas. Regras de apresentação:
 ```
 
 ### 3.3 Rede / acesso (atenção)
-- A URL aponta para o **serviço de push na porta 5000**. Por padrão o host dessa
+- A URL aponta para o **serviço de push na porta 8000**. Por padrão o host dessa
   URL é o **IP da máquina, detectado automaticamente** pelo serviço em runtime
-  (por isso os exemplos acima mostram `192.168.11.24:5000`). Pode ser forçado via
+  (por isso os exemplos acima mostram `192.168.11.24:8000`). Pode ser forçado via
   a env `PUSH_PUBLIC_URL` no serviço de push (ex.: para domínio/reverse-proxy).
 - Se a timeline for aberta no **navegador do usuário**, é o **navegador dele** que
   vai buscar a imagem — portanto esse host:porta precisa estar **acessível a
   partir da máquina do usuário** (mesma rede/VPN), não apenas a partir do servidor
   do `tarefas-jrs`.
-- Se os usuários acessam de fora da rede onde o `192.168.11.24:5000` é visível,
+- Se os usuários acessam de fora da rede onde o `192.168.11.24:8000` é visível,
   há duas opções:
   1. Expor o serviço de push atrás de um domínio/reverse-proxy acessível e ajustar
      `PUSH_PUBLIC_URL` no `.env` do serviço de push; **ou**
   2. O `tarefas-jrs` fazer o download da imagem (server-side, ele consegue
-     alcançar `192.168.11.24:5000`) no momento do recebimento do webhook e
+     alcançar `192.168.11.24:8000`) no momento do recebimento do webhook e
      **re-hospedar** o print no próprio storage do `tarefas-jrs`, salvando a URL
      local em `screenshot_url`. Essa opção é a mais robusta para acesso externo.
 

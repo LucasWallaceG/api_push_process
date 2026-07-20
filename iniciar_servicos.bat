@@ -3,7 +3,7 @@ REM ============================================================
 REM  api_push_process - inicializacao dos servicos
 REM
 REM  start_all.py abre 1 janela de console para cada servico:
-REM    [1] Dashboard Flask       -> main.py (http://localhost:5000)
+REM    [1] Dashboard Flask       -> main.py (http://localhost:8000)
 REM    [2] Consumer Cadastro     -> consumer_cadastrar_push.py
 REM    [3] Consumer Exclusao     -> consumer_excluir_push.py
 REM

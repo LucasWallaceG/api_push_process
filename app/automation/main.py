@@ -25,7 +25,7 @@ API_BASE_URL = "http://192.168.11.24:8000"
 DJANGO_WEBHOOK_URL = f"{API_BASE_URL}/atividades/push/automation/update/status/"
 
 # Porta em que a API Flask (que serve os screenshots) escuta.
-PUSH_PUBLIC_PORT = os.getenv("PUSH_PUBLIC_PORT", "5000")
+PUSH_PUBLIC_PORT = os.getenv("PUSH_PUBLIC_PORT", os.getenv("PORT", "8000"))
 
 # Timeout (segundos) do POST de retorno aos sistemas externos.
 # Tupla (connect, read): conecta rapido, mas da folga para a resposta do destino

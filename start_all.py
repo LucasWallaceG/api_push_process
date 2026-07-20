@@ -22,6 +22,6 @@ if __name__ == "__main__":
     abrir_terminal("Consumer Exclusao", "consumer_excluir_push.py")
 
     print("Iniciando servicos...")
-    print("  [1] Dashboard Flask      -> http://localhost:5000")
+    print("  [1] Dashboard Flask      -> http://localhost:8000")
     print("  [2] Consumer Cadastro    -> queue_push_insert")
     print("  [3] Consumer Exclusao    -> queue_push_delete")
