@@ -3,6 +3,13 @@ import json
 import uuid
 import threading
 from datetime import datetime
+from dotenv import load_dotenv
+
+# Carrega o .env explicitamente. Antes isso vinha por efeito colateral do import
+# de app.core.rabbitmq — se os imports fossem reordenados, PORT/API_BASE_URL
+# voltariam silenciosamente aos defaults.
+load_dotenv()
+
 from flask import Flask, jsonify, request, render_template, send_from_directory, abort
 from app.core.rabbitmq import Rabbitmq
 from app.core.database import init_db, salvar_registro, buscar_registros
