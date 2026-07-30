@@ -1363,6 +1363,66 @@ class AutomacaoPush:
 
     # -----------------------------------------------------
 
+    def deletar_linha(self, row, timeout=5):
+        """
+        Exclui o processo da linha (<tr>) informada e devolve o feedback do PJe.
+
+        Existia uma chamada a self.deletar_linha(...) no fallback de busca
+        completa (main.localizar_e_deletar_processo) sem que o metodo estivesse
+        implementado nesta classe: toda exclusao que dependia do fallback
+        levantava AttributeError, capturado la em cima como
+        "Erro interno na automacao". A rotina de clique ja existia no
+        ProcessosScraper — aqui ela e reaproveitada e o retorno padronizado no
+        mesmo formato de function_main_del_push: {'sucesso': bool, 'mensagem': str}.
+
+        Confirmacao do resultado, nesta ordem:
+          1. mensagem (snackbar) do PJe;
+          2. fallback: total de registros da tela diminuiu apos o clique.
+        Sem nenhuma das duas, devolve sucesso=False — melhor reprocessar do que
+        marcar como excluido algo que talvez nao tenha sido.
+        """
+        scraper = ProcessosScraper(
+            self.driver,
+            self.trt,
+            chaves_unicas=set(),
+            data_execucao=None,
+        )
+
+        try:
+            total_antes = self.obter_total_registros_tela(timeout=5)
+        except Exception:
+            total_antes = 0
+
+        if not scraper.clicar_excluir_da_linha(row):
+            return {"sucesso": False, "mensagem": "Falha ao clicar em excluir"}
+
+        msg = self.capturar_mensagem_feedback(timeout)
+        if isinstance(msg, dict) and msg.get("sucesso"):
+            print(f'- (Msg): {msg}')
+            return msg
+
+        # Sem snackbar: valida pela contagem de registros da tela.
+        try:
+            total_depois = self.obter_total_registros_tela(timeout=5)
+        except Exception:
+            total_depois = 0
+
+        if total_antes and total_depois and total_depois < total_antes:
+            return {
+                "sucesso": True,
+                "mensagem": (
+                    "o processo selecionado foi excluído do push. "
+                    f"(validação por total: {total_antes} -> {total_depois})"
+                ),
+            }
+
+        return {
+            "sucesso": False,
+            "mensagem": "Exclusão acionada, mas o PJe não confirmou a remoção",
+        }
+
+    # -----------------------------------------------------
+
     def function_main_push(self, chaves_unicas, data_execucao):
 
         contexto = detectar_contexto_push(self.driver)

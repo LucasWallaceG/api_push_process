@@ -1,4 +1,6 @@
 import os
+import sys
+import time
 import json
 import socket
 import requests
@@ -10,6 +12,16 @@ from .utils.script_acessar_pje import preparar_ambiente
 from .automation.pages.page_push_actions import AutomacaoPush, ProcessosScraper
 from .utils.script_salvar_log_return_csv import salvar_log_push_xlsx as save_log
 from .utils.utils_limpeza import liberar_memoria_e_limpar_temporarios as clean_files_memory
+
+
+# Logs deste servico usam emoji/acentos. Quando a saida vai para um arquivo ou
+# console em cp1252, um print vira UnicodeEncodeError e derruba o fluxo no meio —
+# inclusive antes do envio do callback. errors="replace" torna o print inofensivo.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 
 
 # ================== CONFIG ==================
@@ -35,6 +47,12 @@ PUSH_PUBLIC_PORT = os.getenv("PUSH_PUBLIC_PORT", os.getenv("PORT", "8000"))
 RETORNO_CONNECT_TIMEOUT = float(os.getenv("RETORNO_CONNECT_TIMEOUT", "5"))
 RETORNO_READ_TIMEOUT = float(os.getenv("RETORNO_READ_TIMEOUT", "30"))
 _RETORNO_TIMEOUT = (RETORNO_CONNECT_TIMEOUT, RETORNO_READ_TIMEOUT)
+
+# Tentativas de ENTREGA do callback. Só reenvia quando o POST nem chegou ao
+# destino (timeout/conexao recusada); resposta nao-2xx NAO e reenviada, para
+# nao duplicar retorno em algo que o destino ja recebeu e rejeitou.
+RETORNO_TENTATIVAS = int(os.getenv("RETORNO_TENTATIVAS", "3"))
+RETORNO_INTERVALO = float(os.getenv("RETORNO_INTERVALO", "3"))
 
 
 def _detectar_ip_local():
@@ -99,32 +117,40 @@ def enviar_retornos(data, resultado, mensagem, screenshot_url=None, codigo=None)
     if callbacks:
         for cb in callbacks:
             url = cb.get("url")
-            try:
-                payload = {
-                    "id": cb.get("id"),
-                    "status": resultado,
-                    "message": mensagem,
-                    "token": cb.get("token"),
-                }
-                if screenshot_abs:
-                    payload["screenshot"] = screenshot_abs
-                if codigo is not None:
-                    payload["codigo"] = codigo
+            payload = {
+                "id": cb.get("id"),
+                "status": resultado,
+                "message": mensagem,
+                "token": cb.get("token"),
+            }
+            if screenshot_abs:
+                payload["screenshot"] = screenshot_abs
+            if codigo is not None:
+                payload["codigo"] = codigo
 
-                print(f"↪️  enviando retorno → {url} | payload: {payload}")
-                resp = requests.post(url, json=payload, timeout=_RETORNO_TIMEOUT)
+            for tentativa in range(1, max(1, RETORNO_TENTATIVAS) + 1):
+                try:
+                    print(f"↪️  enviando retorno → {url} | payload: {payload}")
+                    resp = requests.post(url, json=payload, timeout=_RETORNO_TIMEOUT)
 
-                if 200 <= resp.status_code < 300:
-                    print(f"↩️  retorno OK → {url} [HTTP {resp.status_code}] ({resultado})")
-                else:
-                    # Chegou no destino, mas ele REJEITOU (nao foi 2xx).
+                    if 200 <= resp.status_code < 300:
+                        print(f"↩️  retorno OK → {url} [HTTP {resp.status_code}] ({resultado})")
+                    else:
+                        # Chegou no destino, mas ele REJEITOU (nao foi 2xx).
+                        print(
+                            f"⚠️ retorno REJEITADO → {url} [HTTP {resp.status_code}] "
+                            f"| corpo: {resp.text[:500]}"
+                        )
+                    break  # chegou ao destino — nao reenvia
+
+                except Exception as e:
+                    # Nem chegou (DNS/conexao/timeout). Ex.: 'Read timed out', 'Connection refused'.
                     print(
-                        f"⚠️ retorno REJEITADO → {url} [HTTP {resp.status_code}] "
-                        f"| corpo: {resp.text[:500]}"
+                        f"❌ retorno NAO ENTREGUE (tentativa {tentativa}/{RETORNO_TENTATIVAS}) "
+                        f"→ {url}: {type(e).__name__}: {e}"
                     )
-            except Exception as e:
-                # Nem chegou (DNS/conexao/timeout). Ex.: 'Read timed out', 'Connection refused'.
-                print(f"❌ retorno NAO ENTREGUE → {url}: {type(e).__name__}: {e}")
+                    if tentativa < RETORNO_TENTATIVAS:
+                        time.sleep(RETORNO_INTERVALO)
     else:
         # Contrato Django legado (retrocompatível)
         status_map = {"SUCESSO": "SUCCESS", "AVISO": "SUCCESS", "ERRO": "ERROR"}
@@ -171,6 +197,13 @@ def carregar_json_paginacao(trt):
 
 
 def localizar_e_deletar_processo(automation, trt, processo):
+    """
+    Fallback de exclusao: varre a tabela de push ate achar o processo e exclui.
+
+    O resultado devolvido e o do proprio PJe (retorno de AutomacaoPush.deletar_linha),
+    e nao um texto fixo: antes a funcao respondia "Deletado ..." mesmo quando o
+    clique falhava, mascarando exclusoes que nao aconteceram.
+    """
 
     json_paginas = carregar_json_paginacao(trt)
     pagina_sugerida = json_paginas.get(processo)
@@ -182,6 +215,14 @@ def localizar_e_deletar_processo(automation, trt, processo):
         data_execucao=None
     )
 
+    def _excluir(achado, origem):
+        resultado = automation.deletar_linha(achado["row"])
+        sucesso = bool(resultado.get("sucesso"))
+        mensagem = resultado.get("mensagem") or (
+            f"Deletado ({origem})" if sucesso else f"Falha ao excluir ({origem})"
+        )
+        return sucesso, mensagem
+
     # 🔹 tenta via JSON
     if pagina_sugerida:
         print(f"[INFO] Página sugerida pelo JSON: {pagina_sugerida}")
@@ -189,8 +230,7 @@ def localizar_e_deletar_processo(automation, trt, processo):
 
         achado = scraper.localizar_processo(processo)
         if achado:
-            automation.deletar_linha(achado["row"])
-            return True, "Deletado com base na página do JSON"
+            return _excluir(achado, "página do JSON")
 
     # 🔹 fallback
     print("[INFO] Fallback: busca sequencial")
@@ -198,8 +238,7 @@ def localizar_e_deletar_processo(automation, trt, processo):
     achado = scraper.localizar_processo(processo)
 
     if achado:
-        automation.deletar_linha(achado["row"])
-        return True, "Deletado após busca sequencial"
+        return _excluir(achado, "busca sequencial")
 
     return False, "Processo não localizado"
 
@@ -273,6 +312,24 @@ def start_automation(body):
 
     driver = None
 
+    # Controle de retorno: garante UM callback por mensagem, em qualquer caminho
+    # de saida (sucesso, erro tratado, excecao nao tratada ou falha do proprio
+    # tratamento de erro). Sem isso, uma excecao antes do enviar_retornos —
+    # por exemplo o save_log falhando ao abrir a planilha — deixava a mensagem
+    # pendurada em "aguardando retorno" do lado de quem publicou.
+    estado_retorno = {"enviado": False}
+
+    def _retornar(resultado, mensagem, screenshot_url=None, codigo=None):
+        estado_retorno["enviado"] = True
+        enviar_retornos(data, resultado, mensagem, screenshot_url, codigo)
+
+    def _salvar_log(**kwargs):
+        """save_log e apenas registro local: nunca deve impedir o callback."""
+        try:
+            save_log(**kwargs)
+        except Exception as e:
+            print(f"⚠️ Falha ao salvar log local: {e}")
+
     try:
         # 2. Limpeza de memória e temporários
         clean_files_memory(driver=None)
@@ -291,21 +348,21 @@ def start_automation(body):
             msg = 'Falha ao abrir o navegador do PJe'
             print(f"- [STATUS]: {msg}")
             shot = _shot('ERRO')
-            enviar_retornos(data, "ERRO", msg, shot)
+            _retornar("ERRO", msg, shot)
             return {'data': data, 'status': 'ERRO', 'msg': msg, 'screenshot': shot}
 
         if not garantir_autenticacao(driver, "paula"):
             msg = 'Falha ao se autenticar no PJe'
             print(f"- [STATUS]: {msg}")
             shot = _shot('ERRO')
-            enviar_retornos(data, "ERRO", msg, shot)
+            _retornar("ERRO", msg, shot)
             return {'data': data, 'status': 'ERRO', 'msg': msg, 'screenshot': shot}
 
         if clicar_meu_painel(driver) is None:
             msg = 'Falha ao acessar o painel do PJe'
             print(f"- [STATUS]: {msg}")
             shot = _shot('ERRO')
-            enviar_retornos(data, "ERRO", msg, shot)
+            _retornar("ERRO", msg, shot)
             return {'data': data, 'status': 'ERRO', 'msg': msg, 'screenshot': shot}
 
         mensagem = None
@@ -330,9 +387,17 @@ def start_automation(body):
             if not garantir_perfil(driver, "Advogado"):
                 msg = ("Nao foi possivel trocar para o perfil 'Advogado'. "
                        "O perito pode nao ter esse perfil neste TRT.")
+                # Diagnostico: informa no retorno quais perfis existem de fato
+                # neste TRT, para separar falha de automacao de falta de cadastro.
+                try:
+                    perfis = listar_perfis_disponiveis(driver)
+                    if perfis:
+                        msg += f" Perfis disponiveis neste TRT: {', '.join(perfis)}."
+                except Exception as e:
+                    print(f"⚠️ Falha ao listar perfis disponiveis: {e}")
                 print(f"- [STATUS]: {msg}")
                 shot = _shot('ERRO')
-                enviar_retornos(data, "ERRO", msg, shot)
+                _retornar("ERRO", msg, shot)
                 return {'data': data, 'status': 'ERRO', 'msg': msg, 'screenshot': shot}
 
             print(f'- (ACAO): {action}')
@@ -347,7 +412,7 @@ def start_automation(body):
                 msg = f'Acao invalida: {action}'
                 print(f"- [STATUS]: {msg}")
                 shot = _shot('ERRO')
-                enviar_retornos(data, "ERRO", msg, shot)
+                _retornar("ERRO", msg, shot)
                 return {'data': data, 'status': 'ERRO', 'msg': msg, 'screenshot': shot}
 
         resultado, mensagem_normalizada = normalizar_resultado(mensagem)
@@ -389,14 +454,14 @@ def start_automation(body):
         # enquanto o feedback ainda estava visivel); senao, captura agora.
         screenshot = getattr(automation, "ultimo_screenshot", None) or _shot(resultado)
 
-        save_log(
+        _salvar_log(
             tribunal=f"TRT{trt}",
             numero_processo=processo,
             resultado=resultado,
             mensagem=mensagem_normalizada,
         )
 
-        enviar_retornos(data, resultado, mensagem_normalizada, screenshot, codigo_push)
+        _retornar(resultado, mensagem_normalizada, screenshot, codigo_push)
 
         return {
             'data': data,
@@ -420,18 +485,33 @@ def start_automation(body):
         except Exception:
             screenshot = ""
 
-        save_log(
+        _salvar_log(
             tribunal=trt,
             numero_processo=processo,
             resultado="ERRO",
             mensagem=msg_erro,
         )
 
-        enviar_retornos(data, "ERRO", msg_erro, screenshot)
+        _retornar("ERRO", msg_erro, screenshot)
 
         return {'data': data, 'status': 'ERRO', 'msg': msg_erro, 'screenshot': screenshot}
 
     finally:
+        # Rede de seguranca: nenhuma mensagem pode terminar sem callback. Cobre
+        # BaseException (KeyboardInterrupt/SystemExit), falha dentro do proprio
+        # bloco except e qualquer return futuro que esqueca o retorno.
+        if not estado_retorno["enviado"]:
+            try:
+                print("⚠️ Nenhum retorno enviado ate aqui — disparando retorno de seguranca.")
+                enviar_retornos(
+                    data,
+                    "ERRO",
+                    "Automacao encerrada sem retorno (falha inesperada ou interrupcao). "
+                    "Reprocessar a mensagem.",
+                )
+            except Exception as e:
+                print(f"❌ Falha no retorno de seguranca: {e}")
+
         try:
             clean_files_memory(driver=driver)
         except Exception as cleanup_err:
