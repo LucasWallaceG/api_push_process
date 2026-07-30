@@ -945,6 +945,54 @@ def garantir_perfil(driver, perfil_desejado, timeout=25, tentativas=2):
     return False
 
 
+def listar_perfis_disponiveis(driver, timeout=10):
+    """
+    Lista os perfis oferecidos no menu 'Trocar Órgão Julgador ou Perfil'.
+
+    Usado apenas para DIAGNOSTICO: quando a troca de perfil falha, saber quais
+    perfis o certificado realmente tem naquele TRT distingue erro de automacao
+    de falta de cadastro no tribunal. Nunca levanta excecao — devolve [] se nao
+    conseguir ler.
+    """
+    perfis = []
+    try:
+        xpath_btn_menu = (
+            "//button[contains(@class,'perfil-button') or "
+            "@aria-label='Trocar Órgão Julgador ou Perfil']"
+        )
+        WebDriverWait(driver, timeout).until(
+            EC.element_to_be_clickable((By.XPATH, xpath_btn_menu))
+        ).click()
+
+        itens = WebDriverWait(driver, timeout).until(
+            EC.presence_of_all_elements_located(
+                (By.XPATH, "//button[contains(@class,'mat-menu-item')]")
+            )
+        )
+
+        for item in itens:
+            rotulo = (item.get_attribute("aria-label") or item.text or "").strip()
+            if not rotulo:
+                continue
+            # 'NOME (CPF) - Advogado' → 'Advogado'
+            perfil = rotulo.split(" - ")[-1].strip()
+            if perfil and perfil not in perfis:
+                perfis.append(perfil)
+
+    except Exception as e:
+        print(f"[PERFIL][DIAG] Não foi possível listar os perfis: {e}")
+
+    finally:
+        try:  # fecha o overlay para nao atrapalhar a proxima acao
+            driver.switch_to.active_element.send_keys(Keys.ESCAPE)
+            time.sleep(0.3)
+        except Exception:
+            pass
+
+    print(f"[PERFIL][DIAG] Perfis disponíveis: {perfis}")
+    return perfis
+
+
 def garantir_perfil_v0(driver, perfil_desejado, timeout=10):
     """
     Garante que o perfil ativo seja o perfil_desejado.
