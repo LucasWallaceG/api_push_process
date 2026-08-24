@@ -3,6 +3,7 @@ import sys
 import json
 import uuid
 import threading
+import time
 import pika
 from datetime import datetime
 from dotenv import load_dotenv
@@ -51,7 +52,13 @@ def _registrar(processo, trt, grau, acao, status, msg="", screenshot=None, req_i
     salvar_registro(registro)
 
 
-def callback(ch, method, _properties, body):
+def _processar(body):
+    """Executa a automacao da mensagem.
+
+    Roda numa thread separada para nao bloquear o loop de I/O do pika: uma
+    automacao longa dentro do callback impede o envio de heartbeats e faz o
+    broker derrubar a conexao.
+    """
     processo = None
     data = {}
     # id unico desta requisicao: colapsa o ciclo de vida (PROCESSANDO -> final)
@@ -79,16 +86,42 @@ def callback(ch, method, _properties, body):
         _registrar(processo, trt, grau, acao, status, msg, screenshot, req_id=req_id)
 
         print(f"- [STATUS]: {status} | {msg}")
-
-        print(f"[ACK] Processo {processo} finalizado com status {status} — removido da fila.")
-        ch.basic_ack(delivery_tag=method.delivery_tag)
+        print(f"[ACK] Processo {processo} finalizado com status {status} - removido da fila.")
 
     except Exception as e:
         print(f"[ERRO CRITICO] {e}")
         if processo:
             automacao.enviar_retornos(data, "ERRO", str(e))
             _registrar(processo, None, None, "delete", "ERRO", str(e), req_id=req_id)
-        ch.basic_ack(delivery_tag=method.delivery_tag)
+
+
+def callback(ch, method, _properties, body):
+    connection = ch.connection
+    delivery_tag = method.delivery_tag
+
+    def _worker():
+        try:
+            _processar(body)
+        finally:
+            # o ack precisa voltar para a thread do pika; chamar basic_ack
+            # direto de outra thread corrompe a conexao.
+            connection.add_callback_threadsafe(
+                lambda: _ack_seguro(ch, delivery_tag)
+            )
+
+    threading.Thread(target=_worker, daemon=True).start()
+
+
+def _ack_seguro(ch, delivery_tag):
+    try:
+        if ch.is_open:
+            ch.basic_ack(delivery_tag=delivery_tag)
+        else:
+            # canal caiu durante a automacao: a mensagem volta para a fila
+            # e sera reentregue apos a reconexao.
+            print("[AVISO] Canal fechado antes do ACK; mensagem sera reentregue.")
+    except Exception as e:
+        print(f"[AVISO] Falha ao confirmar mensagem: {e}")
 
 
 def start_consumer():
@@ -103,19 +136,47 @@ def start_consumer():
         blocked_connection_timeout=300
     )
 
-    connection = pika.BlockingConnection(params)
-    channel = connection.channel()
+    while True:
+        connection = None
+        try:
+            connection = pika.BlockingConnection(params)
+            channel = connection.channel()
 
-    channel.queue_declare(queue=QUEUE_NAME, durable=True)
-    channel.basic_qos(prefetch_count=1)
+            channel.queue_declare(queue=QUEUE_NAME, durable=True)
+            channel.basic_qos(prefetch_count=1)
 
-    channel.basic_consume(
-        queue=QUEUE_NAME,
-        on_message_callback=callback
-    )
+            channel.basic_consume(
+                queue=QUEUE_NAME,
+                on_message_callback=callback
+            )
 
-    print(f"[EXCLUSAO] Aguardando mensagens na fila '{QUEUE_NAME}'...")
-    channel.start_consuming()
+            print(f"[EXCLUSAO] Aguardando mensagens na fila '{QUEUE_NAME}'...")
+            channel.start_consuming()
+
+        except KeyboardInterrupt:
+            print(f"[EXCLUSAO] Encerrado pelo usuario.")
+            break
+
+        except pika.exceptions.ConnectionClosedByBroker as e:
+            # broker reiniciado/parado (CONNECTION_FORCED ... 'shutdown')
+            print(f"[RABBITMQ] Conexao fechada pelo broker: {e}")
+
+        except pika.exceptions.AMQPChannelError as e:
+            print(f"[RABBITMQ] Erro de canal: {e}")
+
+        except pika.exceptions.AMQPConnectionError as e:
+            # inclui broker indisponivel, queda de rede e heartbeat perdido
+            print(f"[RABBITMQ] Conexao perdida: {e}")
+
+        finally:
+            try:
+                if connection is not None and connection.is_open:
+                    connection.close()
+            except Exception:
+                pass
+
+        print(f"[RABBITMQ] Reconectando em {RETRY_DELAY}s...")
+        time.sleep(RETRY_DELAY)
 
 
 if __name__ == "__main__":
