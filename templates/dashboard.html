@@ -81,10 +81,18 @@
     .filters input:focus,.filters select:focus{border-color:var(--accent);background:var(--surface);
         box-shadow:0 0 0 3px var(--accent-soft)}
     .filters input::placeholder{color:var(--ink-faint)}
-    .btn-clear{margin-left:auto;padding:9px 18px;background:var(--accent-soft);color:var(--accent);
+    .btn-clear{padding:9px 18px;background:var(--accent-soft);color:var(--accent);
         border:1px solid transparent;border-radius:8px;font-size:13px;cursor:pointer;font-weight:500;
         font-family:inherit;transition:.15s}
     .btn-clear:hover{border-color:var(--accent)}
+    /* Atalhos de periodo: chips arredondados, visualmente subordinados aos inputs */
+    .atalhos{display:flex;gap:5px}
+    .chip-per{border:1px solid var(--line);background:var(--surface-2);color:var(--ink-faint);
+        padding:8px 12px;border-radius:999px;font-size:12px;cursor:pointer;font-family:inherit;transition:.15s}
+    .chip-per:hover{border-color:var(--accent);color:var(--accent)}
+    .chip-per[aria-pressed="true"]{border-color:var(--accent);color:var(--accent);background:var(--accent-soft)}
+    .field-atalhos{min-width:0}
+    #filter-processo{min-width:230px}
 
     /* ── Tabela ── */
     .table-wrap{overflow:hidden}
@@ -178,24 +186,21 @@
     <!-- Filtros -->
     <div class="panel filters">
         <div class="field">
-            <label for="filter-periodo">Período</label>
-            <select id="filter-periodo">
-                <option value="">Hoje</option>
-                <option value="ontem">Ontem</option>
-                <option value="7">Últ. 7 dias</option>
-                <option value="15">Últ. 15 dias</option>
-                <option value="30">Últ. 30 dias</option>
-                <option value="45">Últ. 45 dias</option>
-                <option value="60">Últ. 60 dias</option>
-            </select>
-        </div>
-        <div class="field">
-            <label for="filter-data-inicio">Data inicial</label>
+            <label for="filter-data-inicio">De</label>
             <input type="date" id="filter-data-inicio">
         </div>
         <div class="field">
-            <label for="filter-data-fim">Data final</label>
+            <label for="filter-data-fim">Até</label>
             <input type="date" id="filter-data-fim">
+        </div>
+        <div class="field field-atalhos">
+            <label>Período rápido</label>
+            <div class="atalhos">
+                <button type="button" class="chip-per" data-dias="0">Hoje</button>
+                <button type="button" class="chip-per" data-dias="1">Ontem</button>
+                <button type="button" class="chip-per" data-dias="7">7 dias</button>
+                <button type="button" class="chip-per" data-dias="30">30 dias</button>
+            </div>
         </div>
         <div class="field">
             <label for="filter-status">Status</label>
@@ -215,10 +220,16 @@
             </select>
         </div>
         <div class="field">
-            <label for="filter-processo">Processo</label>
-            <input type="text" id="filter-processo" placeholder="Buscar processo…">
+            <label for="filter-processo">Buscar</label>
+            <input type="search" id="filter-processo" placeholder="Processo, TRT, mensagem…">
         </div>
-        <button class="btn-clear" onclick="clearFilters()">Limpar filtros</button>
+        <div class="field">
+            <label for="filter-por-pagina">Por página</label>
+            <select id="filter-por-pagina">
+                <option>25</option><option>50</option><option>100</option>
+            </select>
+        </div>
+        <button class="btn-clear" id="btn-limpar" type="button">Limpar</button>
     </div>
 
     <!-- Tabela -->
@@ -260,7 +271,7 @@
 
     <script>
         const POLL_INTERVAL = 3000;
-        const PAGE_SIZE = 10;
+        const porPagina = () => parseInt(document.getElementById('filter-por-pagina').value, 10) || 25;
         let allData = [];
         let currentPage = 1;
 
@@ -271,35 +282,46 @@
             return `${y}-${m}-${d}`;
         }
 
+        // Os inputs De/Ate sao a fonte unica da verdade do periodo.
+        // Os chips apenas ESCREVEM neles - nao existe estado paralelo brigando.
         function calcDateRange() {
-            const periodo = document.getElementById('filter-periodo').value;
-            const inputInicio = document.getElementById('filter-data-inicio').value;
-            const inputFim = document.getElementById('filter-data-fim').value;
+            return {
+                data_inicio: document.getElementById('filter-data-inicio').value || '',
+                data_fim: document.getElementById('filter-data-fim').value || ''
+            };
+        }
 
-            // Inputs de data tem prioridade quando preenchidos
-            if (inputInicio || inputFim) {
-                return { data_inicio: inputInicio || '', data_fim: inputFim || '' };
-            }
+        // 0 = hoje | 1 = ontem | N > 1 = ultimos N dias (incluindo hoje)
+        function intervaloDe(dias) {
+            const f = new Date(), i = new Date();
+            if (dias === 1) { i.setDate(i.getDate() - 1); f.setDate(f.getDate() - 1); }
+            else if (dias > 1) { i.setDate(i.getDate() - dias + 1); }
+            return { ini: toISODate(i), fim: toISODate(f) };
+        }
 
-            const hoje = new Date();
+        function aplicarPeriodo(dias) {
+            const r = intervaloDe(dias);
+            document.getElementById('filter-data-inicio').value = r.ini;
+            document.getElementById('filter-data-fim').value = r.fim;
+            marcarChip(dias);
+        }
 
-            if (periodo === 'ontem') {
-                const ontem = new Date(hoje);
-                ontem.setDate(ontem.getDate() - 1);
-                const d = toISODate(ontem);
-                return { data_inicio: d, data_fim: d };
-            }
+        // null = intervalo manual, nenhum chip marcado
+        function marcarChip(dias) {
+            document.querySelectorAll('.chip-per').forEach(c =>
+                c.setAttribute('aria-pressed', String(parseInt(c.dataset.dias, 10) === dias)));
+        }
 
-            if (periodo && !isNaN(periodo)) {
-                const dias = parseInt(periodo);
-                const inicio = new Date(hoje);
-                inicio.setDate(inicio.getDate() - dias);
-                return { data_inicio: toISODate(inicio), data_fim: toISODate(hoje) };
-            }
-
-            // Padrao: hoje
-            const d = toISODate(hoje);
-            return { data_inicio: d, data_fim: d };
+        // Datas digitadas na mao: descobre se batem com algum atalho
+        function sincronizarChip() {
+            const ini = document.getElementById('filter-data-inicio').value;
+            const fim = document.getElementById('filter-data-fim').value;
+            let achou = null;
+            [0, 1, 7, 30].forEach(d => {
+                const r = intervaloDe(d);
+                if (r.ini === ini && r.fim === fim) achou = d;
+            });
+            marcarChip(achou);
         }
 
         function badgeClass(status) {
@@ -366,12 +388,14 @@
             return registros.filter(r => {
                 if (status && r.status !== status) return false;
                 if (trt && String(r.trt) !== trt) return false;
-                if (proc && !(r.processo || '').toLowerCase().includes(proc)) return false;
+                // busca livre: varre processo, TRT e mensagem (como no padrao do painel)
+                if (proc && ![r.processo, r.trt, r.msg].join(' ').toLowerCase().includes(proc)) return false;
                 return true;
             });
         }
 
         function renderTable(registros) {
+            const PAGE_SIZE = porPagina();
             const tbody = document.getElementById('table-body');
             const filtered = getFiltered(registros);
             const total = filtered.length;
@@ -439,16 +463,18 @@
         }
 
         function clearFilters() {
-            document.getElementById('filter-periodo').value = '';
-            document.getElementById('filter-data-inicio').value = '';
-            document.getElementById('filter-data-fim').value = '';
+            aplicarPeriodo(0);                                       // volta para hoje
             document.getElementById('filter-status').value = '';
             document.getElementById('filter-trt').value = '';
             document.getElementById('filter-processo').value = '';
+            document.getElementById('filter-por-pagina').value = '25';
+            currentPage = 1;
             fetchDashboard();
         }
 
+        let reqAtual = 0;
         async function fetchDashboard() {
+            const meu = ++reqAtual;          // guarda de corrida: poll de 3s + acoes do usuario
             try {
                 const range = calcDateRange();
                 const params = new URLSearchParams();
@@ -457,6 +483,7 @@
 
                 const res = await fetch('/api/dashboard?' + params.toString());
                 const json = await res.json();
+                if (meu !== reqAtual) return;    // resposta velha: descarta
                 allData = json.registros || [];
 
                 updateKPIs(allData);
@@ -468,31 +495,42 @@
                 document.getElementById('last-update').textContent =
                     `Atualizado ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
             } catch (e) {
+                if (meu !== reqAtual) return;
                 console.error('Erro ao buscar dados:', e);
             }
         }
 
-        // Filtros de periodo: recarregam dados do servidor
-        document.getElementById('filter-periodo').addEventListener('change', () => {
-            // Limpar inputs de data ao selecionar periodo por atalho
-            document.getElementById('filter-data-inicio').value = '';
-            document.getElementById('filter-data-fim').value = '';
-            fetchDashboard();
-        });
-        document.getElementById('filter-data-inicio').addEventListener('change', () => {
-            // Limpar select de periodo ao usar datas manuais
-            document.getElementById('filter-periodo').value = '';
-            fetchDashboard();
-        });
-        document.getElementById('filter-data-fim').addEventListener('change', () => {
-            document.getElementById('filter-periodo').value = '';
-            fetchDashboard();
+        // Chips de periodo: escrevem nas datas e recarregam do servidor
+        document.querySelectorAll('.chip-per').forEach(c =>
+            c.addEventListener('click', () => {
+                aplicarPeriodo(parseInt(c.dataset.dias, 10));
+                currentPage = 1;
+                fetchDashboard();
+            }));
+
+        // Datas: o intervalo e o unico filtro que viaja na query string
+        ['filter-data-inicio', 'filter-data-fim'].forEach(id =>
+            document.getElementById(id).addEventListener('change', () => {
+                sincronizarChip();
+                currentPage = 1;
+                fetchDashboard();
+            }));
+
+        // Filtros locais: re-render na tabela ja carregada (sempre volta para a pagina 1)
+        ['filter-status', 'filter-trt', 'filter-por-pagina'].forEach(id =>
+            document.getElementById(id).addEventListener('change', () => { currentPage = 1; renderTable(allData); }));
+
+        // Busca com debounce: nao re-renderiza a cada tecla
+        let deb;
+        document.getElementById('filter-processo').addEventListener('input', () => {
+            clearTimeout(deb);
+            deb = setTimeout(() => { currentPage = 1; renderTable(allData); }, 350);
         });
 
-        // Filtros locais: re-render na tabela existente (volta para página 1)
-        document.getElementById('filter-status').addEventListener('change', () => { currentPage = 1; renderTable(allData); });
-        document.getElementById('filter-trt').addEventListener('change', () => { currentPage = 1; renderTable(allData); });
-        document.getElementById('filter-processo').addEventListener('input', () => { currentPage = 1; renderTable(allData); });
+        document.getElementById('btn-limpar').addEventListener('click', clearFilters);
+
+        // Estado inicial: hoje (mesmo default do servidor quando nao recebe datas)
+        aplicarPeriodo(0);
 
         // Poll
         fetchDashboard();
