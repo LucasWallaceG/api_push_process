@@ -11,3 +11,5 @@ firefox_profiles/
 
 # Script auxiliar de depuracao local
 debug_cad_push.py
+# Capturas do modo diagnostico do PJe (PJE_DIAG=1)
+diagnostico/

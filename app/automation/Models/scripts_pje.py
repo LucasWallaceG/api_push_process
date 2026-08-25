@@ -1,5 +1,7 @@
 import time
 import os, re
+import html as html_lib
+import unicodedata
 import requests
 import pyautogui
 from datetime import datetime
@@ -16,6 +18,8 @@ from selenium.common.exceptions import (
 )
 from selenium.webdriver.firefox.service import Service as FirefoxService
 from selenium.webdriver.firefox.options import Options as FirefoxOptions
+
+from ..utils import diagnostico as diag
 
 
 
@@ -162,6 +166,32 @@ def send_intimacoes_api(intimacoes, perito_id):
         return False
 
 
+def _liberar_lock_perfil(perfil_dir):
+    """Remove um parent.lock orfao deixado por um Firefox que morreu.
+
+    Sem isso a nova instancia nao abre o perfil e o driver fica pendurado.
+
+    ATENCAO: a receita generica manda dar 'taskkill /IM firefox.exe' quando o
+    lock nao sai. Aqui NAO se faz isso: os consumers de cadastro e exclusao
+    rodam em paralelo, cada um com seu Firefox, e um taskkill global derrubaria
+    a automacao do outro servico (e um login manual em andamento). Lock que nao
+    sai significa perfil realmente em uso — o certo e avisar e deixar o Firefox
+    reportar o erro.
+    """
+    lock = os.path.join(perfil_dir, "parent.lock")
+    if not os.path.exists(lock):
+        return
+    try:
+        os.remove(lock)
+        print("- (Perfil): parent.lock orfao removido.")
+    except OSError:
+        print(
+            "⚠️ (Perfil): parent.lock em uso — o perfil parece aberto em outro "
+            "processo (outra execucao ou o login_manual.bat). "
+            f"Perfil: {perfil_dir}"
+        )
+
+
 def criar_driver(perfil_nome=None):
     options = FirefoxOptions()
 
@@ -174,6 +204,7 @@ def criar_driver(perfil_nome=None):
         perfil_nome = os.getenv("FIREFOX_PROFILE", "default")
     perfil_dir = os.path.abspath(os.path.join("firefox_profiles", perfil_nome))
     os.makedirs(perfil_dir, exist_ok=True)
+    _liberar_lock_perfil(perfil_dir)
     options.add_argument("-profile")
     options.add_argument(perfil_dir)
 
@@ -188,6 +219,10 @@ def criar_driver(perfil_nome=None):
     print(f'- (Firefox profile): {perfil_dir}')
     service = FirefoxService(executable_path=caminho_driver)
     driver = webdriver.Firefox(service=service, options=options)
+    # Sem timeout o Selenium espera ate 300s por pagina e trava indefinidamente
+    # se a comunicacao com o navegador degringolar — com a mensagem ainda
+    # unacked, segurando a fila.
+    driver.set_page_load_timeout(60)
     driver.maximize_window()
     return driver
 
@@ -201,6 +236,7 @@ def abrir_pje(driver, trt, grau="primeirograu"):
         
 
         driver.get(url)
+        diag.capturar(driver, f"abrir_pje-trt{trt}-{grau}", f"url={url}")
         return driver
     except Exception as e:
         mensagem = f'❌ Erro ao acessar TRT-{trt}: {e}'
@@ -212,6 +248,7 @@ def abrir_pje(driver, trt, grau="primeirograu"):
 def clicar_botao_pdpj(driver, timeout=20):
     try:
         wait = WebDriverWait(driver, timeout)
+        diag.capturar(driver, "pdpj-antes-do-clique")
 
         # 1️⃣ Aguarda o botão existir no DOM
         botao = wait.until(
@@ -236,7 +273,8 @@ def clicar_botao_pdpj(driver, timeout=20):
 
         mensagem = "✅ Botão PDPJ clicado com sucesso."
         print(mensagem)
-        
+        diag.capturar(driver, "pdpj-depois-do-clique")
+
         return True
 
     except TimeoutException:
@@ -1947,10 +1985,62 @@ def get_processos_advogado(driver, perito_id):
         return None
 
 
+# Marcadores do captcha anti-robo do Keycloak/PDPJ. SEMPRE comparados em
+# minusculas e SEM acentos (ver _normalizar_pagina): sem essa normalizacao,
+# "é" / "&ecirc;" / "e" nao casam entre si e a deteccao falha em silencio.
+MARCADORES_CAPTCHA = (
+    "confirmar que voce e humano",
+    "vamos confirmar que voce",
+    "escolha todos(as)",
+    "conclua a verificacao de seguranca",
+    "verifica se voce nao e um bot",
+    'class="g-recaptcha"',
+    'class="h-captcha"',
+    "/recaptcha/api2/",
+    "hcaptcha.com/captcha",
+)
+
+MSG_CAPTCHA = (
+    "O PJe exibiu captcha anti-robo (a sessao do perfil expirou e o SSO passou "
+    "a tratar os logins como forca bruta). A automacao NAO tenta novo login. "
+    "Rode o login_manual.bat no MESMO perfil, faca o login resolvendo o "
+    "captcha, feche o Firefox e reinicie o consumer."
+)
+
+# Motivo da ultima falha de garantir_autenticacao, para o chamador diferenciar
+# "captcha, precisa de acao humana" de "login falhou". Ver garantir_autenticacao.
+_ULTIMO_MOTIVO_AUTH = None
+
+
+def ultimo_motivo_autenticacao():
+    """Mensagem da ultima falha de autenticacao (None se nao houve)."""
+    return _ULTIMO_MOTIVO_AUTH
+
+
+def _normalizar_pagina(texto):
+    texto = html_lib.unescape(texto or "")
+    texto = unicodedata.normalize("NFKD", texto)
+    return "".join(c for c in texto if not unicodedata.combining(c)).lower()
+
+
+def captcha_presente(driver):
+    """True quando a tela atual e o captcha anti-robo do SSO."""
+    try:
+        pagina = _normalizar_pagina(driver.page_source)
+    except Exception:
+        return False
+    return any(m in pagina for m in MARCADORES_CAPTCHA)
+
+
 def detectar_estado_pje(driver):
     """
     Detecta o estado real do PJe com base no DOM.
     """
+
+    # 🚫 Captcha primeiro: e bloqueio terminal, nao adianta seguir o roteiro de
+    # login (nao ha tela de certificado para clicar, e insistir piora o bloqueio).
+    if captcha_presente(driver):
+        return "CAPTCHA"
 
     # ✅ Já autenticado
     if driver.find_elements(By.XPATH, '//*[@aria-label="Meu Painel"]'):
@@ -1974,26 +2064,93 @@ def detectar_estado_pje(driver):
     return "DESCONHECIDO"
 
 
-def garantir_autenticacao(driver, perito, max_tentativas=5):
+def _aguardar_saida_do_pdpj(driver, timeout=30):
+    """Espera o redirect do SSO sair da tela do botao PDPJ.
+
+    Sem esta espera, o laco clica e reavalia o estado no ato: a pagina em
+    transito vira DESCONHECIDO, cada volta dorme so 1s e a autenticacao desiste
+    por esgotar tentativas — sem que nada tenha falhado de fato.
+    """
+    try:
+        WebDriverWait(driver, timeout).until(
+            lambda d: (
+                not d.find_elements(By.ID, "btnSsoPdpj")
+                or d.find_elements(By.XPATH, '//*[@aria-label="Meu Painel"]')
+                or d.find_elements(By.ID, "otp")
+                or d.find_elements(
+                    By.XPATH,
+                    "//a[.//span[contains(text(), 'Seu certificado digital')]]",
+                )
+            )
+        )
+        return True
+    except TimeoutException:
+        print("⚠️ [AUTH] Redirect do PDPJ nao concluiu dentro do tempo.")
+        return False
+    except Exception as erro:
+        print(f"⚠️ [AUTH] Falha ao aguardar o redirect do PDPJ: {erro}")
+        return False
+
+
+def garantir_autenticacao(driver, perito, max_tentativas=8):
+    """Autentica conduzindo pelo ESTADO da tela — nunca "por via das duvidas".
+
+    - AUTENTICADO   -> retorna True SEM relogar (reaproveita a sessao do perfil).
+    - CAPTCHA       -> para e retorna False (o operador precisa re-semear o perfil).
+    - CODIGO_ACESSO -> OTPs espacados e limitados; rajada de OTP tambem traz captcha.
+
+    Relogar a cada mensagem e exatamente o que faz o SSO (Keycloak) tratar a
+    automacao como forca bruta e exibir o captcha. Por isso nenhum passo de
+    login deve ser chamado fora desta funcao.
+
+    Em caso de falha, o motivo fica em ultimo_motivo_autenticacao().
+    """
+    global _ULTIMO_MOTIVO_AUTH
+    _ULTIMO_MOTIVO_AUTH = None
+
+    OTP_MAX = 3
+    ESPERA_OTP = 20
+    otps = 0
     tentativa = 0
+
+    diag.capturar(driver, "garantir_autenticacao-entrada", f"perito={perito}")
 
     while tentativa < max_tentativas:
         tentativa += 1
         estado = detectar_estado_pje(driver)
 
-        print(f"[AUTH] Estado detectado: {estado}")
+        print(f"[AUTH] Estado detectado: {estado} (tentativa {tentativa}/{max_tentativas})")
+        diag.capturar(driver, f"auth-estado-{estado}", f"tentativa={tentativa}")
 
         if estado == "AUTENTICADO":
             return True
 
+        if estado == "CAPTCHA":
+            print(f"🚫 [AUTH] {MSG_CAPTCHA}")
+            diag.capturar(driver, "auth-captcha")
+            _ULTIMO_MOTIVO_AUTH = MSG_CAPTCHA
+            return False
+
         if estado == "PDPJ":
             clicar_botao_pdpj(driver)
+            _aguardar_saida_do_pdpj(driver)
 
         elif estado == "CERTIFICADO":
             clicar_certificado_digital(driver)
             preencher_senha_desktop(perito)
 
         elif estado == "CODIGO_ACESSO":
+            if otps >= OTP_MAX:
+                print(f"❌ [AUTH] Limite de {OTP_MAX} codigos de acesso atingido.")
+                _ULTIMO_MOTIVO_AUTH = (
+                    f"Limite de {OTP_MAX} codigos de acesso (OTP) atingido sem "
+                    "confirmar o login."
+                )
+                return False
+            if otps:
+                # Espaca os reenvios: rajada de OTP e lida como forca bruta.
+                time.sleep(ESPERA_OTP)
+            otps += 1
             codigo = gerar_codigo(perito)
             if not codigo:
                 continue
@@ -2003,4 +2160,7 @@ def garantir_autenticacao(driver, perito, max_tentativas=5):
         else:
             time.sleep(1)
 
+    print("❌ [AUTH] Tentativas esgotadas sem autenticar.")
+    diag.capturar(driver, "auth-tentativas-esgotadas")
+    _ULTIMO_MOTIVO_AUTH = "Tentativas de autenticacao esgotadas sem chegar ao painel."
     return False
