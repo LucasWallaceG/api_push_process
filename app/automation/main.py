@@ -352,7 +352,11 @@ def start_automation(body):
             return {'data': data, 'status': 'ERRO', 'msg': msg, 'screenshot': shot}
 
         if not garantir_autenticacao(driver, "paula"):
-            msg = 'Falha ao se autenticar no PJe'
+            # O motivo real (captcha, limite de OTP, tentativas esgotadas) vai no
+            # callback e no dashboard: "Falha ao se autenticar" sozinho nao diz
+            # que quem precisa agir e o operador, re-semeando o perfil.
+            motivo = ultimo_motivo_autenticacao()
+            msg = f'Falha ao se autenticar no PJe: {motivo}' if motivo else 'Falha ao se autenticar no PJe'
             print(f"- [STATUS]: {msg}")
             shot = _shot('ERRO')
             _retornar("ERRO", msg, shot)
