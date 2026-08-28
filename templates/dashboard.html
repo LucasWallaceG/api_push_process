@@ -60,15 +60,25 @@
 
     /* ── KPIs ── */
     .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:14px}
+    /* Mesmo formato do painel do ProtocolaAI e do Acervo: numero grande em cima,
+       rotulo com a bolinha da cor do status embaixo. */
     .kpi{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);
-         padding:13px 15px;box-shadow:var(--shadow);position:relative;overflow:hidden}
-    .kpi::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--idle)}
-    .kpi.is-queue::before{background:var(--idle)}
-    .kpi.is-run::before{background:var(--run)}
-    .kpi.is-ok::before{background:var(--ok)}
-    .kpi.is-crit::before{background:var(--crit)}
-    .kpi-label{font-size:11px;text-transform:uppercase;letter-spacing:.7px;color:var(--ink-faint)}
-    .kpi-value{font-size:26px;font-weight:700;line-height:1.15;margin-top:5px;font-variant-numeric:tabular-nums}
+         padding:13px 15px;box-shadow:var(--shadow);
+         width:100%;text-align:left;font-family:inherit;color:inherit;cursor:pointer;
+         transition:border-color .15s,background .15s}
+    .kpi:hover{border-color:var(--accent)}
+    .kpi[aria-pressed="true"]{border-color:var(--accent);background:var(--accent-soft)}
+    .kpi:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+    .kpi-value{font-size:26px;font-weight:700;line-height:1.15;
+               font-variant-numeric:tabular-nums;color:var(--accent)}
+    .kpi-label{display:flex;align-items:center;gap:6px;margin-top:5px;
+               font-size:11px;text-transform:uppercase;letter-spacing:.7px;color:var(--ink-faint)}
+    .kpi-dot{width:8px;height:8px;border-radius:2px;flex:0 0 auto;background:var(--accent)}
+    .kpi.is-queue .kpi-value{color:var(--idle)}  .kpi.is-queue .kpi-dot{background:var(--idle)}
+    .kpi.is-run   .kpi-value{color:var(--run)}   .kpi.is-run   .kpi-dot{background:var(--run)}
+    .kpi.is-ok    .kpi-value{color:var(--ok)}    .kpi.is-ok    .kpi-dot{background:var(--ok)}
+    .kpi.is-warn  .kpi-value{color:var(--warn)}  .kpi.is-warn  .kpi-dot{background:var(--warn)}
+    .kpi.is-crit  .kpi-value{color:var(--crit)}  .kpi.is-crit  .kpi-dot{background:var(--crit)}
 
     /* ── Filtros ── */
     .panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow)}
@@ -163,25 +173,8 @@
         <a class="btn" href="/docs" target="_blank" rel="noopener">📘 Guia da API</a>
     </header>
 
-    <!-- KPIs -->
-    <div class="kpis">
-        <div class="kpi is-queue">
-            <div class="kpi-label">Na fila</div>
-            <div class="kpi-value" id="kpi-fila">0</div>
-        </div>
-        <div class="kpi is-run">
-            <div class="kpi-label">Processando</div>
-            <div class="kpi-value" id="kpi-processando">0</div>
-        </div>
-        <div class="kpi is-ok">
-            <div class="kpi-label">Sucesso</div>
-            <div class="kpi-value" id="kpi-sucesso">0</div>
-        </div>
-        <div class="kpi is-crit">
-            <div class="kpi-label">Erro</div>
-            <div class="kpi-value" id="kpi-erro">0</div>
-        </div>
-    </div>
+    <!-- KPIs — cards gerados pelo renderKpis(); clicar aplica o filtro de status -->
+    <div class="kpis" id="kpis"></div>
 
     <!-- Filtros -->
     <div class="panel filters">
@@ -342,20 +335,32 @@
             return `${pad(d.getDate())}/${pad(d.getMonth()+1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
         }
 
-        function updateKPIs(registros) {
-            let fila = 0, processando = 0, sucesso = 0, erro = 0;
-            registros.forEach(r => {
-                switch(r.status) {
-                    case 'AGUARDANDO': fila++; break;
-                    case 'PROCESSANDO': processando++; break;
-                    case 'SUCESSO': case 'AVISO': sucesso++; break;
-                    case 'ERRO': erro++; break;
-                }
-            });
-            document.getElementById('kpi-fila').textContent = fila;
-            document.getElementById('kpi-processando').textContent = processando;
-            document.getElementById('kpi-sucesso').textContent = sucesso;
-            document.getElementById('kpi-erro').textContent = erro;
+        // [valor do #filter-status, rotulo, classe de cor]. '' = card Total (limpa o filtro).
+        // Um card por status do <select> — AVISO tem o seu, senao clicar em "Sucesso"
+        // filtraria menos registros do que o proprio card mostra.
+        const ORDEM_KPI = [
+            ['',            'Total',       'is-total'],
+            ['AGUARDANDO',  'Aguardando',  'is-queue'],
+            ['PROCESSANDO', 'Processando', 'is-run'],
+            ['SUCESSO',     'Sucesso',     'is-ok'],
+            ['AVISO',       'Aviso',       'is-warn'],
+            ['ERRO',        'Erro',        'is-crit'],
+        ];
+
+        // Contam sobre o mesmo recorte da tabela, menos o filtro de status: os cards
+        // SAO a quebra por status, entao filtrar por ele zeraria todos os outros.
+        function renderKpis(registros) {
+            const base = getFiltered(registros, true);
+            const porStatus = new Map();
+            base.forEach(r => porStatus.set(r.status, (porStatus.get(r.status) || 0) + 1));
+            const ativo = document.getElementById('filter-status').value;
+            document.getElementById('kpis').innerHTML = ORDEM_KPI.map(([s, rotulo, cls]) => {
+                const n = s ? (porStatus.get(s) || 0) : base.length;
+                return `<button type="button" class="kpi ${cls}" data-s="${s}" aria-pressed="${s === ativo}">
+                    <div class="kpi-value">${n}</div>
+                    <div class="kpi-label"><span class="kpi-dot"></span>${rotulo}</div>
+                </button>`;
+            }).join('');
         }
 
         function populateTRTs(registros) {
@@ -380,8 +385,8 @@
             select.value = current;
         }
 
-        function getFiltered(registros) {
-            const status = document.getElementById('filter-status').value;
+        function getFiltered(registros, ignorarStatus) {
+            const status = ignorarStatus ? '' : document.getElementById('filter-status').value;
             const trt = document.getElementById('filter-trt').value;
             const proc = document.getElementById('filter-processo').value.trim().toLowerCase();
 
@@ -459,6 +464,12 @@
 
         function goPage(p) {
             currentPage = p;
+            renderTable(allData);   // paginar nao muda as contagens: KPIs ficam como estao
+        }
+
+        // Indicadores e tabela leem os mesmos filtros — sempre atualize os dois juntos.
+        function renderAll() {
+            renderKpis(allData);
             renderTable(allData);
         }
 
@@ -486,9 +497,8 @@
                 if (meu !== reqAtual) return;    // resposta velha: descarta
                 allData = json.registros || [];
 
-                updateKPIs(allData);
                 populateTRTs(allData);
-                renderTable(allData);
+                renderAll();
 
                 const now = new Date();
                 const pad = n => String(n).padStart(2, '0');
@@ -518,13 +528,23 @@
 
         // Filtros locais: re-render na tabela ja carregada (sempre volta para a pagina 1)
         ['filter-status', 'filter-trt', 'filter-por-pagina'].forEach(id =>
-            document.getElementById(id).addEventListener('change', () => { currentPage = 1; renderTable(allData); }));
+            document.getElementById(id).addEventListener('change', () => { currentPage = 1; renderAll(); }));
+
+        // KPIs: clicar num card e um atalho para o filtro de status (Total = limpar).
+        // Delegacao porque o renderKpis() recria os botoes a cada render.
+        document.getElementById('kpis').addEventListener('click', e => {
+            const btn = e.target.closest('.kpi');
+            if (!btn) return;
+            document.getElementById('filter-status').value = btn.dataset.s;
+            currentPage = 1;
+            renderAll();
+        });
 
         // Busca com debounce: nao re-renderiza a cada tecla
         let deb;
         document.getElementById('filter-processo').addEventListener('input', () => {
             clearTimeout(deb);
-            deb = setTimeout(() => { currentPage = 1; renderTable(allData); }, 350);
+            deb = setTimeout(() => { currentPage = 1; renderAll(); }, 350);
         });
 
         document.getElementById('btn-limpar').addEventListener('click', clearFilters);
